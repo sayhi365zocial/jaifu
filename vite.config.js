@@ -2,9 +2,37 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
+// Mount the same Express API the production server uses directly on the
+// vite dev server, so `npm run dev` runs the full stack in one process
+// (needs DATABASE_URL set, e.g. via a .env loaded by your shell).
+function jaifuApiPlugin() {
+  return {
+    name: "jaifu-api",
+    async configureServer(server) {
+      if (!process.env.DATABASE_URL) {
+        server.config.logger.warn(
+          "[jaifu-api] DATABASE_URL not set — /api/jaifu disabled in dev"
+        );
+        return;
+      }
+      const express = (await import("express")).default;
+      const { default: jaifuApi } = await import("./server/jaifu-api.js");
+      const { ensureSchema } = await import("./server/db.js");
+      await ensureSchema().catch((e) =>
+        server.config.logger.error("[jaifu-api] schema init: " + e.message)
+      );
+      const app = express();
+      app.set("trust proxy", 1);
+      app.use("/api/jaifu", jaifuApi);
+      server.middlewares.use(app);
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     react(),
+    jaifuApiPlugin(),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["icons/icon.svg", "icons/apple-touch-icon.png"],
@@ -29,21 +57,11 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // never let the SW swallow API calls or serve index.html for them
         navigateFallbackDenylist: [/^\/api\//],
       },
     }),
   ],
   server: {
     port: 5180,
-    proxy: {
-      // Target the local backend. macOS AirPlay Receiver squats on ports
-      // near :5000/:7000 — backend runs on :5050 in local dev (override
-      // with VITE_DEV_API_TARGET if needed).
-      "/api": {
-        target: process.env.VITE_DEV_API_TARGET || "http://127.0.0.1:5050",
-        changeOrigin: true,
-      },
-    },
   },
 });

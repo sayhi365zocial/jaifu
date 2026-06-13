@@ -9,8 +9,9 @@ RUN npm install
 
 COPY . .
 
-# Vite bakes these in at build time — Railway exposes service env vars
-# during the build phase.
+# Vite bakes VITE_* in at build time. VITE_API_BASE_URL is optional — the
+# server serves the API same-origin, so leave it unset unless the API lives
+# elsewhere. VITE_FEEDBACK_URL defaults to a mailto when unset.
 ARG VITE_API_BASE_URL
 ARG VITE_FEEDBACK_URL
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
@@ -20,6 +21,8 @@ RUN npm run build
 
 
 # --- Runtime ---------------------------------------------------------
+# Only express + pg are needed at runtime (browser libs are bundled into
+# dist/), so --omit=dev keeps the image lean.
 FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
@@ -28,6 +31,7 @@ COPY package.json package-lock.json* ./
 RUN npm install --omit=dev && npm cache clean --force
 
 COPY server.js ./
+COPY server ./server
 COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000

@@ -3,6 +3,8 @@
    absolute lifetime numbers so every push is idempotent and self-healing
    (a missed push is repaired by the next one). */
 
+// Same-origin by default: the Jaifu server serves both the SPA and the API.
+// VITE_API_BASE_URL only needs setting if the API is hosted elsewhere.
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api").replace(
   /\/+$/,
   ""
