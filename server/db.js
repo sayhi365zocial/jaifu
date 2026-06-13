@@ -26,8 +26,21 @@ export async function ensureSchema() {
       order_count  INTEGER NOT NULL DEFAULT 0,
       item_counts  JSONB   NOT NULL DEFAULT '{}'::jsonb,
       hour_counts  JSONB   NOT NULL DEFAULT '{}'::jsonb,
+      method_counts JSONB  NOT NULL DEFAULT '{}'::jsonb,
+      mood_counts  JSONB   NOT NULL DEFAULT '{}'::jsonb,
+      lift_counts  JSONB   NOT NULL DEFAULT '{}'::jsonb,
       first_seen   TIMESTAMP DEFAULT NOW(),
       last_seen    TIMESTAMP DEFAULT NOW()
     )
+  `);
+  // CREATE TABLE IF NOT EXISTS won't add columns to a table that predates the
+  // analytics extension, so add them explicitly. ADD COLUMN IF NOT EXISTS is
+  // idempotent (safe every boot); NOT NULL DEFAULT '{}' backfills existing
+  // rows as a metadata-only default on PG 11+ (instant, no table rewrite).
+  await query(`
+    ALTER TABLE jaifu_stats
+      ADD COLUMN IF NOT EXISTS method_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS mood_counts   JSONB NOT NULL DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS lift_counts   JSONB NOT NULL DEFAULT '{}'::jsonb
   `);
 }

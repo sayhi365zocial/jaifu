@@ -21,6 +21,9 @@ export async function pushStats(me) {
         orderCount: me.orderCount,
         itemCounts: me.itemCounts,
         hourCounts: me.hourCounts,
+        methodCounts: me.methodCounts,
+        moodCounts: me.moodCounts,
+        liftCounts: me.liftCounts,
       }),
     }
   );

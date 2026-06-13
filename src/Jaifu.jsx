@@ -290,6 +290,10 @@ export default function Jaifu() {
         savedAll: s.savedAll || 0,
         top: Array.isArray(s.top) ? s.top : [],
         hours: Array.isArray(s.hours) ? s.hours : Array(24).fill(0),
+        // Default to {} so an older server (no analytics yet) can't crash Admin.
+        methods: s.methods || {},
+        moods: s.moods || {},
+        lifts: s.lifts || {},
       });
     } catch (e) {
       setGlobal({ error: true });
@@ -438,6 +442,12 @@ export default function Jaifu() {
     const hourCounts = { ...fresh.hourCounts };
     const h = String(now.getHours());
     hourCounts[h] = (hourCounts[h] || 0) + 1;
+    // Anonymous aggregates: which delivery method, and the mood that led here.
+    // moodBefore is null when the user deep-linked past the check-in — skip it.
+    const methodCounts = { ...fresh.methodCounts };
+    methodCounts[deliveryMethod] = (methodCounts[deliveryMethod] || 0) + 1;
+    const moodCounts = { ...fresh.moodCounts };
+    if (moodBefore) moodCounts[moodBefore] = (moodCounts[moodBefore] || 0) + 1;
     const ts = now.getTime();
     const entry = {
       // Shipping folds into the jar, so the saved amount is the full orderTotal.
@@ -477,6 +487,8 @@ export default function Jaifu() {
       history: [...fresh.history, entry].slice(-100),
       itemCounts,
       hourCounts,
+      methodCounts,
+      moodCounts,
       today: dk,
       todayCount: fresh.today === dk ? fresh.todayCount + 1 : 1,
       activeDelivery, // a re-order while one is in flight simply replaces it
@@ -526,9 +538,16 @@ export default function Jaifu() {
     const i = history.findIndex((h) => h.ts === lastTs && h.lift === null);
     if (i !== -1) {
       history[i] = { ...history[i], moodAfter: after.id, lift: after.lift };
-      const next = { ...fresh, history };
+      // Tally the after-feeling into the anonymous aggregate and push it. The
+      // i !== -1 / lift === null guard makes this idempotent — a second tap
+      // won't double-count. This fires after the order's own push, carrying
+      // the same orderCount, which the server merges per-key (no rollback).
+      const liftCounts = { ...fresh.liftCounts };
+      liftCounts[after.id] = (liftCounts[after.id] || 0) + 1;
+      const next = { ...fresh, history, liftCounts };
       saveMe(next);
       setMe(next);
+      pushStats(next).catch(() => { /* shared stats are best-effort */ });
     }
     setMoodBefore(null);
     // Hand off to the live tracking screen if a delivery is in flight (the
@@ -1170,7 +1189,7 @@ function Stats({ totalSaved, orderCount, streak, answeredCount, liftPct, wantRea
         <button className="jf-global-btn" onClick={goAdmin}>
           <TrendingUp size={16} /> ดูสถิติรวมของทุกคน
         </button>
-        <div className="jf-anon-note">สถิติรวมเก็บแบบไม่ระบุตัวตน — เฉพาะยอดรวม เมนูยอดฮิต และช่วงเวลา ไม่มีประวัติรายออเดอร์</div>
+        <div className="jf-anon-note">สถิติรวมเก็บแบบไม่ระบุตัวตน — เฉพาะยอดรวม เมนูยอดฮิต ช่วงเวลา วิธีจัดส่ง อารมณ์ก่อนสั่ง และความรู้สึกหลังสั่ง (นับเป็นภาพรวมเท่านั้น) ไม่มีการเก็บประวัติรายออเดอร์</div>
 
         <div style={{ height: 100 }} />
       </div>
@@ -1187,6 +1206,31 @@ function Stats({ totalSaved, orderCount, streak, answeredCount, liftPct, wantRea
         </a>
         <button className="jf-cta" onClick={again}><Home size={16} /> ช้อปต่อ</button>
       </div>
+    </div>
+  );
+}
+
+// Friendly Thai labels + display order for the small aggregate maps.
+const METHOD_LABELS = [["instant", "ส่งทันที"], ["scheduled", "สั่งล่วงหน้า"], ["normal", "ส่งปกติ"]];
+const MOOD_LABELS = [["stress", "เครียด"], ["bored", "เบื่อ"], ["sad", "เศร้า"], ["tired", "เหนื่อย"]];
+const LIFT_LABELS = [["better", "โล่งขึ้น"], ["same", "เหมือนเดิม"], ["want", "ยังอยากซื้อจริง"]];
+
+// Reuses the .jf-bars markup for any fixed-key count map. Math.max(1, …) floors
+// the denominator so an all-zero or single-key map never divides by zero.
+function CountBars({ data, labels }) {
+  const rows = labels.map(([k, lbl]) => [lbl, (data && data[k]) || 0]);
+  const max = Math.max(1, ...rows.map((r) => r[1]));
+  if (!rows.some((r) => r[1] > 0)) return <div className="jf-chart-empty">ยังไม่มีข้อมูล</div>;
+  return (
+    <div className="jf-bars">
+      {rows.map(([lbl, n]) => (
+        <div key={lbl} className="jf-bar-item">
+          <div className="jf-bar-label"><span>{lbl}</span><b>{n}</b></div>
+          <div className="jf-bar-track">
+            <div className="jf-bar-fill" style={{ width: (n / max) * 100 + "%" }} />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1257,6 +1301,21 @@ function Admin({ g, refresh, back }) {
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div className="jf-chart-card" style={{ marginTop: 14 }}>
+              <div className="jf-chart-title">วิธีจัดส่งที่เลือก</div>
+              <CountBars data={g.methods} labels={METHOD_LABELS} />
+            </div>
+
+            <div className="jf-chart-card" style={{ marginTop: 14 }}>
+              <div className="jf-chart-title">อารมณ์ก่อนสั่ง</div>
+              <CountBars data={g.moods} labels={MOOD_LABELS} />
+            </div>
+
+            <div className="jf-chart-card" style={{ marginTop: 14 }}>
+              <div className="jf-chart-title">ความรู้สึกหลังสั่ง</div>
+              <CountBars data={g.lifts} labels={LIFT_LABELS} />
             </div>
           </>
         )}

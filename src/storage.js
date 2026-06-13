@@ -22,6 +22,9 @@ export function defaultMe() {
     lastDate: null, // toDateString() of the last completed order
     itemCounts: {}, // { "ข้าวมันไก่": 3, ... } — lifetime, pushed to shared stats
     hourCounts: {}, // { "13": 2, ... } — one tick per checkout
+    methodCounts: {}, // { instant, scheduled, normal } — delivery choice, pushed
+    moodCounts: {}, // { stress, bored, sad, tired } — mood before ordering, pushed
+    liftCounts: {}, // { better, same, want } — after-mood answer, pushed
     today: null, // toDateString() for the daily soft cap
     todayCount: 0,
     activeDelivery: null, // in-flight imaginary delivery (see Track screen), or null
@@ -42,6 +45,12 @@ function normalize(me) {
       me.itemCounts && typeof me.itemCounts === "object" ? me.itemCounts : {},
     hourCounts:
       me.hourCounts && typeof me.hourCounts === "object" ? me.hourCounts : {},
+    methodCounts:
+      me.methodCounts && typeof me.methodCounts === "object" ? me.methodCounts : {},
+    moodCounts:
+      me.moodCounts && typeof me.moodCounts === "object" ? me.moodCounts : {},
+    liftCounts:
+      me.liftCounts && typeof me.liftCounts === "object" ? me.liftCounts : {},
     // A malformed activeDelivery must never crash the Track screen: only keep
     // it if it's an object carrying a numeric absolute ETA, else fall to null.
     activeDelivery:

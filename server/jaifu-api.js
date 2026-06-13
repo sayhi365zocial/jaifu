@@ -18,6 +18,12 @@ const ITEM_NAMES = new Set([
   "นาฬิกาสมาร์ตวอตช์", "กระเป๋าสะพายข้าง", "แว่นกันแดด", "หมอนอิงนุ่มฟู",
 ]);
 
+// Fixed key sets for the small aggregate maps — must match the ids in
+// src/Jaifu.jsx (DELIVERY_METHODS, MOODS, AFTER). Anything else is dropped.
+const METHOD_IDS = new Set(["instant", "scheduled", "normal"]);
+const MOOD_IDS = new Set(["stress", "bored", "sad", "tired"]);
+const LIFT_IDS = new Set(["better", "same", "want"]);
+
 const MAX_PRICE = 4070; // max item ฿3,990 + jumbo/topping add-ons
 const MAX_COUNT = 200000;
 const MAX_ORDERS = 200000;
@@ -66,6 +72,23 @@ function cleanCounts(obj, keyOk) {
   return out;
 }
 
+// SQL fragment: merge a jsonb count map per key by GREATEST(existing, incoming).
+// Keys are the union of both sides (so a key present on only one side is kept);
+// each value is the integer max. The result is order-independent and monotonic,
+// which is what lets an equal-order_count push update its keys without rolling
+// back any other. `col` is a trusted literal column name (never user input).
+const mergeMax = (col) => `(
+  SELECT COALESCE(jsonb_object_agg(k, to_jsonb(GREATEST(
+           COALESCE((jaifu_stats.${col} ->> k)::numeric, 0),
+           COALESCE((EXCLUDED.${col}  ->> k)::numeric, 0)
+         )::bigint)), '{}'::jsonb)
+  FROM (
+    SELECT jsonb_object_keys(jaifu_stats.${col}) AS k
+    UNION
+    SELECT jsonb_object_keys(EXCLUDED.${col}) AS k
+  ) ks
+)`;
+
 // PUT /api/jaifu/stats/:userId — upsert this client's absolute aggregates.
 router.put("/stats/:userId", rateLimit(30), jaifuBody, async (req, res) => {
   try {
@@ -85,21 +108,34 @@ router.put("/stats/:userId", rateLimit(30), jaifuBody, async (req, res) => {
     const hourCounts = cleanCounts(req.body.hourCounts, (k) =>
       /^([0-9]|1[0-9]|2[0-3])$/.test(k)
     );
+    const methodCounts = cleanCounts(req.body.methodCounts, (k) => METHOD_IDS.has(k));
+    const moodCounts = cleanCounts(req.body.moodCounts, (k) => MOOD_IDS.has(k));
+    const liftCounts = cleanCounts(req.body.liftCounts, (k) => LIFT_IDS.has(k));
 
-    // GREATEST keeps totals monotonic; the jsonb maps are gated on the same
-    // order_count so a late out-of-order push can't roll them back.
+    // GREATEST keeps totals monotonic. The jsonb maps are merged PER KEY by
+    // GREATEST (not all-or-nothing) so a push at an equal order_count — e.g.
+    // the after-mood lift push that follows an order push — raises its own
+    // keys without clobbering the others, and no stale/out-of-order push can
+    // ever lower a key. The client always sends absolute lifetime counts, so
+    // per-key max is order-independent, idempotent, and self-healing. ::bigint
+    // keeps stored values integer so the summary's integer filter never drops
+    // a key. EXCLUDED is read via its column (not an SRF in FROM) for clarity.
     await query(
-      `INSERT INTO jaifu_stats (user_id, saved, order_count, item_counts, hour_counts, last_seen)
-       VALUES ($1, $2, $3, $4, $5, NOW())
+      `INSERT INTO jaifu_stats
+         (user_id, saved, order_count, item_counts, hour_counts, method_counts, mood_counts, lift_counts, last_seen)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
        ON CONFLICT (user_id) DO UPDATE SET
          saved = GREATEST(jaifu_stats.saved, EXCLUDED.saved),
          order_count = GREATEST(jaifu_stats.order_count, EXCLUDED.order_count),
-         item_counts = CASE WHEN EXCLUDED.order_count >= jaifu_stats.order_count
-                            THEN EXCLUDED.item_counts ELSE jaifu_stats.item_counts END,
-         hour_counts = CASE WHEN EXCLUDED.order_count >= jaifu_stats.order_count
-                            THEN EXCLUDED.hour_counts ELSE jaifu_stats.hour_counts END,
+         item_counts = ${mergeMax("item_counts")},
+         hour_counts = ${mergeMax("hour_counts")},
+         method_counts = ${mergeMax("method_counts")},
+         mood_counts = ${mergeMax("mood_counts")},
+         lift_counts = ${mergeMax("lift_counts")},
          last_seen = NOW()`,
-      [userId, saved, orderCount, JSON.stringify(itemCounts), JSON.stringify(hourCounts)]
+      [userId, saved, orderCount,
+       JSON.stringify(itemCounts), JSON.stringify(hourCounts),
+       JSON.stringify(methodCounts), JSON.stringify(moodCounts), JSON.stringify(liftCounts)]
     );
     res.json({ ok: true });
   } catch (error) {
@@ -134,10 +170,30 @@ router.get("/stats/summary", rateLimit(60), async (req, res) => {
         WHERE key ~ '^[0-9]+$' AND value ~ '^[0-9]+$'
         GROUP BY key`
     );
+    // The three small fixed-key maps: SUM per key across all users.
+    const sumMap = (col) =>
+      query(
+        `SELECT key, SUM(value::numeric)::bigint AS n
+           FROM jaifu_stats, jsonb_each_text(${col})
+          WHERE value ~ '^[0-9]+$'
+          GROUP BY key`
+      );
+    const [methodRows, moodRows, liftRows] = await Promise.all([
+      sumMap("method_counts"),
+      sumMap("mood_counts"),
+      sumMap("lift_counts"),
+    ]);
     const hours = Array(24).fill(0);
     hourRows.rows.forEach((r) => {
       if (r.hour >= 0 && r.hour < 24) hours[r.hour] = Number(r.n);
     });
+    // Zero-filled, fixed key order — a missing key shows 0, never undefined.
+    const toMap = (rows, keys) => {
+      const o = {};
+      keys.forEach((k) => { o[k] = 0; });
+      rows.forEach((r) => { if (r.key in o) o[r.key] = Number(r.n); });
+      return o;
+    };
     const t = totals.rows[0] || {};
     const data = {
       users: Number(t.users) || 0,
@@ -145,6 +201,9 @@ router.get("/stats/summary", rateLimit(60), async (req, res) => {
       savedAll: Number(t.saved_all) || 0,
       top: top.rows.map((r) => [r.name, Number(r.n)]),
       hours,
+      methods: toMap(methodRows.rows, ["instant", "scheduled", "normal"]),
+      moods: toMap(moodRows.rows, ["stress", "bored", "sad", "tired"]),
+      lifts: toMap(liftRows.rows, ["better", "same", "want"]),
     };
     summaryCache = { at: Date.now(), data };
     res.json(data);
