@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Heart, ShoppingBag, Utensils, Plus, X, ChevronLeft,
   Check, PiggyBank, Home, Sparkles, TrendingUp, Flame, Bike,
@@ -107,9 +107,88 @@ const ORDER_STEPS_SHOP = [
 // Soft daily cap: past this, a gentle interstitial asks the user to pause.
 const DAILY_CAP = 5;
 
+/* -------- delivery options (chosen on the cart screen) --------
+   The shipping fee folds into the jar like everything else — it's part of
+   "ยอดที่ใจอยากจ่าย", not a real charge. */
+const SHIPPING = { instant: 50, scheduled: 0, normal: 30 };
+const DELIVERY_METHODS = [
+  { id: "instant", label: "ส่งทันที", emoji: "⚡", note: "ส่งไวที่สุด — ไรเดอร์ซิ่งมาเลย" },
+  { id: "scheduled", label: "สั่งล่วงหน้า", emoji: "🗓️", note: "เลือกเวลาเองได้ · ส่งฟรี" },
+  { id: "normal", label: "ส่งปกติ", emoji: "🛵", note: "มาตามคิว สบายๆ ใจเย็นๆ" },
+];
+
+// Live status lines shown on the Track screen as the wait progresses.
+const FOOD_TRACK_LINES = [
+  "ไรเดอร์รับของจากร้านเรียบร้อย 🛵",
+  "กำลังซิ่งมาหาคุณอยู่นะ ใจเย็นๆ",
+  "อีกนิดเดียว ของ(ในจินตนาการ) ใกล้ถึงแล้ว",
+  "เลี้ยวเข้าซอยแล้ว เตรียมเปิดใจรับได้เลย ✨",
+];
+const SHOP_TRACK_LINES = [
+  "ร้านยืนยันคำสั่งซื้อแล้ว 📦",
+  "กำลังแพ็กอย่างทะนุถนอม 🎁",
+  "เข้าระบบขนส่งแล้ว กำลังมาส่ง 🚚",
+  "พัสดุใกล้ถึงมือคุณแล้ว ✨",
+];
+
+// Funny/มโน reasons for why the "normal" delivery takes a few minutes. Picked
+// once at commit and frozen into activeDelivery.reason so it stays stable
+// across reloads. Light and kind — never mean.
+const FUNNY_REASONS = [
+  "ไรเดอร์แวะเติมลมยางก่อนออกตัว 🛵",
+  "ฝนตกปรอยๆ เลยขอวิ่งช้าลงนิด เซฟทั้งของเซฟทั้งคน",
+  "ติดไฟแดงยาวมาก นับไปแล้ว 47 วินาที",
+  "ร้านทอดไข่ดาวให้ใหม่ ขอเวลาให้กรอบกำลังดี 🍳",
+  "ไรเดอร์หลงเข้าซอยตันนิดนึง กำลังถอยรถออกมา",
+  "แวะซื้อน้ำให้ตัวเองก่อน วันนี้อากาศร้อนจริงๆ",
+  "ป้าข้างทางทักว่าหล่อ เลยเสียเวลายิ้มไปหน่อย 😄",
+  "GPS พาอ้อมโลกนิดหน่อย แต่ใจมุ่งตรงมาหาคุณ",
+  "รอลิฟต์คอนโดอยู่ ลิฟต์มาช้ากว่าไรเดอร์อีก",
+  "หมาแถวบ้านออกมาต้อนรับ ขอเล่นด้วยแป๊บนึง 🐶",
+  "ไรเดอร์แวะกราบไหว้ศาลขอให้ส่งทันใจคุณ 🙏",
+  "ถุงจะขาด เลยขอผูกปมให้แน่นอีกรอบ",
+  "เจอเพื่อนไรเดอร์ทักทาย คุยกันสองคำตามมารยาท",
+  "มอเตอร์ไซค์ดับกลางทางนิดนึง กำลังสตาร์ทใหม่ ใจสู้อยู่",
+];
+const INSTANT_REASON = "ไรเดอร์ซิ่งมาเต็มสปีด ทันใจสุดๆ 🛵💨";
+const SCHED_REASON = "จดเวลาไว้ในปฏิทินของจักรวาลแล้ว รอเจอกันตามนัด 🗓️";
+
+// Generate scheduled delivery slots: round the current time UP to the next
+// :00/:30 boundary, then 8 slots at 30-min steps. Each carries an absolute
+// epoch-ms ts (so the countdown survives reload) and a Thai label; a slot that
+// lands on a different calendar day is prefixed "พรุ่งนี้".
+function makeSlots(fromMs) {
+  const start = new Date(fromMs);
+  start.setSeconds(0, 0);
+  const m = start.getMinutes();
+  // next clean half-hour, with a little lead so the earliest slot isn't "now"
+  start.setMinutes(m < 30 ? 30 : 60);
+  const today = new Date(fromMs).toDateString();
+  const slots = [];
+  for (let i = 0; i < 8; i++) {
+    const d = new Date(start.getTime() + i * 30 * 60000);
+    const time = d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+    const nextDay = d.toDateString() !== today;
+    slots.push({ ts: d.getTime(), label: (nextDay ? "พรุ่งนี้ " : "") + time + " น." });
+  }
+  return slots;
+}
+
+// Format an absolute-ETA remaining time. mm:ss for short waits; H:MM:SS once an
+// hour or more remains (scheduled deliveries can be hours out). Always clamps
+// at zero so it never shows negative time.
+function fmtRemain(remMs) {
+  const total = Math.max(0, Math.floor(remMs / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h > 0 ? h + ":" + pad(m) + ":" + pad(s) : m + ":" + pad(s);
+}
+
 // Screens that are safe to deep-link / bookmark via the URL hash. Transient
 // flow screens (ordering, reveal, detail, cart, breathe) deliberately are not.
-const LINKABLE = new Set(["stats", "admin"]);
+const LINKABLE = new Set(["stats", "admin", "track"]);
 const initialScreen = () => {
   const h = typeof window !== "undefined" ? window.location.hash.slice(1) : "";
   return LINKABLE.has(h) ? h : "mood";
@@ -135,10 +214,36 @@ export default function Jaifu() {
   const [orderStep, setOrderStep] = useState(0);
   const [pop, setPop] = useState(false);
   const [global, setGlobal] = useState(null);
+  // Delivery selection lives only in React state (not persisted) — defaults to
+  // the gentle "ส่งปกติ" each fresh load. scheduledSlot is an absolute epoch-ms.
+  const [deliveryMethod, setDeliveryMethod] = useState("normal");
+  const [scheduledSlot, setScheduledSlot] = useState(null);
 
   const items = tab === "food" ? FOOD : SHOP;
   const customCfg = tab === "food" ? FOOD_CUSTOM : SHOP_CUSTOM;
   const cartTotal = cart.reduce((s, c) => s + c.total, 0);
+  // Shipping folds into the jar: orderTotal is the single source of truth for
+  // both the CTA and the commit (so jar / chart / reveal all agree).
+  const shippingFee = SHIPPING[deliveryMethod];
+  const orderTotal = cartTotal + shippingFee;
+  // Regenerate the scheduled slots each render off a coarse (per-minute) clock
+  // so a cart left open never offers an already-passed slot.
+  const slotClock = Math.floor(Date.now() / 60000);
+  const scheduleSlots = React.useMemo(() => makeSlots(Date.now()), [slotClock]);
+  // If the picked slot ages out of the regenerated list (cart left open past
+  // it), drop it — otherwise the chip silently de-highlights while the CTA
+  // stays enabled, and the order would commit with a mismatched "ตามนัด" reason.
+  useEffect(() => {
+    if (scheduledSlot !== null && !scheduleSlots.some((s) => s.ts === scheduledSlot)) {
+      setScheduledSlot(null);
+    }
+  }, [scheduleSlots, scheduledSlot]);
+
+  // Always-fresh handle on the active delivery for the once-registered popstate
+  // listener (its `me` closure is the mount-time snapshot, and freshest() falls
+  // back to that stale copy when storage is unavailable — a ref dodges both).
+  const activeDeliveryRef = useRef(me.activeDelivery);
+  useEffect(() => { activeDeliveryRef.current = me.activeDelivery; }, [me.activeDelivery]);
 
   // Ritual steps follow what's actually in the cart, not the active tab.
   const shopCount = cart.filter((c) => c.kind === "shop").length;
@@ -213,6 +318,13 @@ export default function Jaifu() {
   useEffect(() => {
     const onPop = () => {
       const h = window.location.hash.slice(1);
+      // #track has no meaning without a live delivery — read the ref (always
+      // current), not the mount-time closure, so a back into a finished
+      // delivery doesn't strand the user on an empty screen.
+      if (h === "track" && !activeDeliveryRef.current) {
+        setScreen("mood");
+        return;
+      }
       if (LINKABLE.has(h)) {
         if (h === "admin") loadGlobal();
         setScreen(h);
@@ -222,6 +334,40 @@ export default function Jaifu() {
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // On mount: clear a long-stale delivery, and never land on an empty #track.
+  useEffect(() => {
+    const d = me.activeDelivery;
+    const stale = d && Date.now() - d.eta > 6 * 3600000; // unacknowledged > 6h
+    if (stale) {
+      const next = { ...freshest(me), activeDelivery: null };
+      saveMe(next);
+      setMe(next);
+    }
+    if (initialScreen() === "track" && (!d || stale)) {
+      setScreen(me.totalSaved > 0 ? "stats" : "mood");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reconcile across tabs: when another tab rewrites the record (e.g. collects
+  // or re-orders a delivery), refresh so a live countdown here doesn't ghost.
+  // pageshow covers iOS bfcache restores that skip visibilitychange.
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key && e.key !== "jaifu:me") return;
+      const fresh = freshest(me);
+      if (fresh) setMe(fresh);
+    };
+    const onShow = () => setMe(freshest(me));
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("pageshow", onShow);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("pageshow", onShow);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -294,24 +440,56 @@ export default function Jaifu() {
     hourCounts[h] = (hourCounts[h] || 0) + 1;
     const ts = now.getTime();
     const entry = {
-      idx: orderCount, saved: cartTotal,
+      // Shipping folds into the jar, so the saved amount is the full orderTotal.
+      idx: orderCount, saved: orderTotal,
       moodBefore, moodAfter: null, lift: null, ts,
+    };
+    // Build the in-flight imaginary delivery. ETA is an absolute timestamp so
+    // the countdown survives reload; the funny reason is frozen here so it
+    // doesn't re-randomize on every render.
+    let eta, reason;
+    if (deliveryMethod === "instant") {
+      eta = ts + 60000 + Math.floor(Math.random() * 60000); // 60–120s
+      reason = INSTANT_REASON;
+    } else if (deliveryMethod === "scheduled") {
+      // Clamp to at least a minute out so a slot the user dawdled past doesn't
+      // commit as instantly-"arrived" and skip the whole tracking moment.
+      eta = Math.max(scheduledSlot || ts + 30 * 60000, ts + 60000);
+      reason = SCHED_REASON;
+    } else {
+      eta = ts + (3 + Math.floor(Math.random() * 12)) * 60000; // 3–14 min (≤15)
+      reason = FUNNY_REASONS[Math.floor(Math.random() * FUNNY_REASONS.length)];
+    }
+    const activeDelivery = {
+      method: deliveryMethod,
+      eta,
+      placedTs: ts,
+      reason,
+      amount: orderTotal,
+      itemCount: cart.length,
+      steps: orderSteps === ORDER_STEPS_SHOP ? "shop" : "food",
+      dismissed: false,
     };
     const next = {
       ...fresh,
-      totalSaved: fresh.totalSaved + cartTotal,
+      totalSaved: fresh.totalSaved + orderTotal,
       orderCount,
       history: [...fresh.history, entry].slice(-100),
       itemCounts,
       hourCounts,
       today: dk,
       todayCount: fresh.today === dk ? fresh.todayCount + 1 : 1,
+      activeDelivery, // a re-order while one is in flight simply replaces it
     };
     saveMe(next);
     setMe(next);
-    setLastAmount(cartTotal);
+    setLastAmount(orderTotal);
     setLastTs(ts); // so finishReveal patches THIS entry, not another tab's
     setCart([]);
+    // Reset the selector so the next order starts clean (and the CTA is never
+    // mysteriously disabled by a stale scheduled-without-slot state).
+    setDeliveryMethod("normal");
+    setScheduledSlot(null);
     setScreen("reveal");
     pushStats(next).catch(() => { /* shared stats are best-effort */ });
   };
@@ -353,6 +531,18 @@ export default function Jaifu() {
       setMe(next);
     }
     setMoodBefore(null);
+    // Hand off to the live tracking screen if a delivery is in flight (the
+    // natural next beat after relief: "now it's on the way"); else the jar.
+    setScreen(fresh.activeDelivery ? "track" : "stats");
+  };
+
+  // Collect the arrived delivery: clears the in-flight state and shows the jar.
+  // read-merge-write so a second tab's newer record isn't clobbered.
+  const ackDelivery = () => {
+    const fresh = freshest(me);
+    const next = { ...fresh, activeDelivery: null };
+    saveMe(next);
+    setMe(next);
     setScreen("stats");
   };
 
@@ -412,6 +602,7 @@ export default function Jaifu() {
             cartCount={cart.length} cartTotal={cartTotal} pop={pop}
             goCart={() => setScreen("cart")} goStats={() => setScreen("stats")}
             totalSaved={me.totalSaved}
+            activeDelivery={me.activeDelivery} goTrack={() => setScreen("track")}
           />
         )}
 
@@ -424,7 +615,10 @@ export default function Jaifu() {
 
         {screen === "cart" && (
           <Cart
-            cart={cart} total={cartTotal} back={() => setScreen("feed")}
+            cart={cart} total={cartTotal} orderTotal={orderTotal} shippingFee={shippingFee}
+            method={deliveryMethod} setMethod={setDeliveryMethod}
+            slot={scheduledSlot} setSlot={setScheduledSlot} slots={scheduleSlots}
+            back={() => setScreen("feed")}
             remove={(uid) => setCart((c) => c.filter((x) => x.uid !== uid))}
             order={startOrder}
           />
@@ -446,6 +640,13 @@ export default function Jaifu() {
           <Reveal amount={lastAmount} total={me.totalSaved} onDone={finishReveal} />
         )}
 
+        {screen === "track" && (
+          <Track
+            d={me.activeDelivery} onArrivedAck={ackDelivery}
+            goStats={() => setScreen("stats")} goShop={shopAgain}
+          />
+        )}
+
         {screen === "stats" && (
           <Stats
             totalSaved={me.totalSaved} orderCount={me.orderCount}
@@ -454,6 +655,7 @@ export default function Jaifu() {
             chartData={chartData} insight={insight}
             again={shopAgain}
             goAdmin={() => { setScreen("admin"); loadGlobal(); }}
+            activeDelivery={me.activeDelivery} goTrack={() => setScreen("track")}
           />
         )}
 
@@ -486,9 +688,9 @@ function Mood({ onPick }) {
   );
 }
 
-function Feed({ tab, setTab, items, openItem, cartCount, cartTotal, pop, goCart, goStats, totalSaved }) {
+function Feed({ tab, setTab, items, openItem, cartCount, cartTotal, pop, goCart, goStats, totalSaved, activeDelivery, goTrack }) {
   return (
-    <div className="jf-screen">
+    <div className={"jf-screen" + (activeDelivery ? " jf-feed-has-deliv" : "")}>
       <div className="jf-top">
         <div className="jf-top-row">
           <div className="jf-logo sm"><Heart size={16} fill="currentColor" /> ใจฟู</div>
@@ -533,7 +735,52 @@ function Feed({ tab, setTab, items, openItem, cartCount, cartTotal, pop, goCart,
           <span>{baht(cartTotal)} · ดูตะกร้า</span>
         </button>
       )}
+      {activeDelivery && <FeedDeliveryPill d={activeDelivery} onClick={goTrack} />}
     </div>
+  );
+}
+
+// Floating "on the way" pill on the feed — its own 1s tick, scoped here so the
+// rest of the feed doesn't re-render every second. Remaining is always derived
+// from the absolute ETA, so a backgrounded tab self-corrects on the next tick.
+function FeedDeliveryPill({ d, onClick }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const remMs = d.eta - now;
+  const arrived = remMs <= 0;
+  const clock = fmtRemain(remMs);
+  return (
+    <button className="jf-deliv-pill" onClick={onClick}
+      aria-label={arrived ? "ส่งถึงแล้ว เปิดดูการจัดส่ง" : "กำลังจัดส่ง เหลือ " + clock + " เปิดดูการจัดส่ง"}>
+      <span className="jf-deliv-pill-l">
+        {arrived ? <Check size={16} /> : <Bike size={16} />}
+        {arrived ? "ส่งถึงแล้ว 🎉" : "กำลังจัดส่ง"}
+      </span>
+      {!arrived && <span className="jf-deliv-pill-time">เหลือ {clock}</span>}
+    </button>
+  );
+}
+
+// Stats-screen doorway into Track. Ticks once a second so its label flips to
+// "ส่งถึงแล้ว" the moment the ETA crosses, even while sitting on the jar.
+function TrackEntryButton({ d, onClick }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const arrived = now >= d.eta;
+  return (
+    <button className="jf-track-entry" onClick={onClick}>
+      <span className="jf-track-entry-l">
+        <Bike size={16} />
+        {arrived ? "ส่งถึงแล้ว 🎉 — แตะเพื่อดู" : "กำลังจัดส่งอยู่ — แตะเพื่อติดตาม"}
+      </span>
+      <ChevronLeft size={18} style={{ transform: "rotate(180deg)" }} />
+    </button>
   );
 }
 
@@ -573,7 +820,10 @@ function Detail({ item, cfg, opts, toggle, extra, back, add }) {
   );
 }
 
-function Cart({ cart, total, back, remove, order }) {
+function Cart({ cart, total, orderTotal, shippingFee, method, setMethod, slot, setSlot, slots, back, remove, order }) {
+  const empty = cart.length === 0;
+  const needSlot = method === "scheduled" && slot === null;
+  const methodNote = DELIVERY_METHODS.find((m) => m.id === method).note;
   return (
     <div className="jf-screen">
       <div className="jf-detail-head between">
@@ -582,7 +832,7 @@ function Cart({ cart, total, back, remove, order }) {
         <div style={{ width: 36 }} />
       </div>
       <div className="jf-detail-scroll">
-        {cart.length === 0 && (
+        {empty && (
           <div className="jf-chart-empty">ตะกร้าว่างแล้ว — กลับไปเลือกของที่อยากได้ก่อนนะ</div>
         )}
         {cart.map((c) => (
@@ -596,13 +846,53 @@ function Cart({ cart, total, back, remove, order }) {
             <button className="jf-remove" onClick={() => remove(c.uid)} aria-label={"ลบ " + c.name + " ออกจากตะกร้า"}><X size={16} /></button>
           </div>
         ))}
+
+        {!empty && (
+          <div className="jf-group jf-deliv-group">
+            <div className="jf-group-label">เลือกวิธีจัดส่ง</div>
+            <div className="jf-chips jf-deliv-chips">
+              {DELIVERY_METHODS.map((m) => {
+                const fee = SHIPPING[m.id];
+                const on = method === m.id;
+                return (
+                  <button key={m.id} className={"jf-chip jf-deliv-chip " + (on ? "on" : "")}
+                    onClick={() => setMethod(m.id)} aria-pressed={on}>
+                    <span className="jf-deliv-emoji" aria-hidden="true">{m.emoji}</span>
+                    <span className="jf-deliv-main">{m.label}</span>
+                    <span className="jf-chip-add">{fee === 0 ? "ส่งฟรี" : "+" + baht(fee)}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="jf-deliv-note">{methodNote}</div>
+
+            {method === "scheduled" && (
+              <div className="jf-slot-wrap">
+                <div className="jf-group-label">เลือกเวลาที่อยากให้มาส่ง</div>
+                <div className="jf-chips">
+                  {slots.map((s, i) => (
+                    <button key={s.ts} className={"jf-chip " + (slot === s.ts ? "on" : "")}
+                      onClick={() => setSlot(s.ts)} aria-pressed={slot === s.ts}>
+                      {s.label}{i === 0 && <span className="jf-chip-add"> เร็วสุด</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {shippingFee > 0 && (
+              <div className="jf-deliv-fee">รวมค่าส่ง {baht(shippingFee)} — ก็เข้ากระปุกเหมือนกันนะ 💛</div>
+            )}
+          </div>
+        )}
+
         <div className="jf-cart-note">
-          <Sparkles size={14} /> ออเดอร์นี้จะไม่ถูกตัดเงินจริง — ยอดทั้งหมดจะเข้ากระปุกของคุณ
+          <Sparkles size={14} /> ค่าส่งรวมอยู่ในยอดนี้แล้ว และทั้งหมดจะเข้ากระปุกของคุณ ไม่ได้ตัดเงินจริงนะ 💛
         </div>
         <div style={{ height: 96 }} />
       </div>
-      <button className="jf-cta order" onClick={order} disabled={cart.length === 0}>
-        สั่งเลย · {baht(total)}
+      <button className="jf-cta order" onClick={order} disabled={empty || needSlot}>
+        {needSlot ? "เลือกเวลาก่อนนะ" : "สั่งเลย · " + baht(orderTotal)}
       </button>
     </div>
   );
@@ -722,7 +1012,86 @@ function Reveal({ amount, total, onDone }) {
   );
 }
 
-function Stats({ totalSaved, orderCount, streak, answeredCount, liftPct, wantReal, chartData, insight, again, goAdmin }) {
+// Live delivery tracking. The countdown is INFORMATION, not decoration, so its
+// 1s tick runs regardless of reduced-motion; remaining is recomputed from the
+// absolute ETA every render, so closing/reopening the app shows the truth.
+function Track({ d, onArrivedAck, goStats, goShop }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    const snap = () => setNow(Date.now()); // snap to truth on refocus / bfcache
+    document.addEventListener("visibilitychange", snap);
+    window.addEventListener("pageshow", snap);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", snap);
+      window.removeEventListener("pageshow", snap);
+    };
+  }, []);
+
+  // Defensive fallback — never a blank frame if we land here without a delivery
+  // (e.g. the moment between another tab clearing it and a guard redirecting).
+  if (!d) {
+    return (
+      <div className="jf-screen jf-center jf-pad">
+        <div className="jf-order-label">ยังไม่มีรายการจัดส่ง</div>
+        <div className="jf-track-sub">ตอนนี้ไม่มีของกำลังมาส่งนะ</div>
+        <button className="jf-cta ghost" style={{ marginTop: 24 }} onClick={goStats}>
+          <PiggyBank size={16} /> ดูกระปุก
+        </button>
+      </div>
+    );
+  }
+
+  const remMs = d.eta - now;
+  const arrived = remMs <= 0;
+  const clock = fmtRemain(remMs);
+  const arriveAt = new Date(d.eta).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+
+  // Advance the live status line by elapsed fraction of the wait.
+  const LINES = d.steps === "shop" ? SHOP_TRACK_LINES : FOOD_TRACK_LINES;
+  const span = d.eta - d.placedTs;
+  const frac = span > 0 ? 1 - remMs / span : 1;
+  const lineIdx = arrived ? LINES.length - 1 : Math.min(LINES.length - 1, Math.max(0, Math.floor(frac * LINES.length)));
+
+  return (
+    <div className="jf-screen jf-center jf-pad">
+      <div className={"jf-order-bubble" + (arrived ? " jf-track-done" : "")}>
+        {arrived ? <Check size={40} /> : <Bike size={40} />}
+      </div>
+
+      {!arrived ? (
+        <>
+          <div className="jf-order-label">กำลังจัดส่ง</div>
+          <div className="jf-track-clock" aria-live="off">{clock}</div>
+          <div className="jf-track-sub">คาดว่าถึงเวลา {arriveAt} น.</div>
+          <div className="jf-track-line" aria-live="polite">{LINES[lineIdx]}</div>
+          <div className="jf-track-reason"><Sparkles size={14} /> {d.reason}</div>
+          <div className="jf-track-jar">ยอด {baht(d.amount)} เข้ากระปุกเรียบร้อยแล้ว — ของยังเดินทางมาให้ใจฟูต่อ 💛</div>
+        </>
+      ) : (
+        <>
+          <div className="jf-order-label">ส่งถึงแล้ว 🎉</div>
+          <div className="jf-track-sub">ของจริงไม่ได้มาส่งหรอกนะ 💛 แต่ความฟินกับเงินในกระปุกมาส่งถึงใจคุณแล้วเรียบร้อย</div>
+          <div className="jf-track-jar">ยอด {baht(d.amount)} อยู่ในกระปุกของคุณเรียบร้อย</div>
+        </>
+      )}
+
+      <div className="jf-after-row" style={{ width: "100%", marginTop: 24 }}>
+        <button className="jf-after-btn" onClick={goShop}>
+          <span className="jf-after-emoji" aria-hidden="true">🏠</span>
+          <span>ช้อปต่อ</span>
+        </button>
+        <button className="jf-after-btn" onClick={arrived ? onArrivedAck : goStats}>
+          <span className="jf-after-emoji" aria-hidden="true">{arrived ? "🐷" : "📊"}</span>
+          <span>{arrived ? "เก็บใส่กระปุก" : "ดูกระปุก"}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Stats({ totalSaved, orderCount, streak, answeredCount, liftPct, wantReal, chartData, insight, again, goAdmin, activeDelivery, goTrack }) {
   return (
     <div className="jf-screen">
       <div className="jf-detail-head between">
@@ -734,6 +1103,8 @@ function Stats({ totalSaved, orderCount, streak, answeredCount, liftPct, wantRea
           <div className="jf-jar-amount">{baht(totalSaved)}</div>
           <div className="jf-jar-cap">ยอดที่ใจอยากจ่าย แต่ไม่ได้จ่ายจริง — ลองโอนบางส่วนเข้าบัญชีออมจริงดูนะ</div>
         </div>
+
+        {activeDelivery && <TrackEntryButton d={activeDelivery} onClick={goTrack} />}
 
         <div className="jf-stat-row">
           <div className="jf-stat-box">
@@ -1016,6 +1387,27 @@ button[disabled]{ opacity:.45; pointer-events:none; }
 .jf-cart-note{ display:flex; gap:8px; align-items:flex-start; background:var(--sage-l); color:var(--sage-text);
   border-radius:14px; padding:12px 14px; font-size:12.5px; line-height:1.5; margin-top:6px; }
 
+/* delivery selector (cart) */
+.jf-deliv-group{ margin-top:18px; }
+.jf-deliv-chips{ flex-direction:column; gap:9px; }
+.jf-deliv-chip{ display:flex; align-items:center; gap:10px; width:100%; padding:13px 15px; text-align:left; }
+.jf-deliv-emoji{ font-size:20px; }
+.jf-deliv-main{ flex:1; }
+.jf-deliv-chip .jf-chip-add{ opacity:.9; font-weight:600; }
+.jf-deliv-chip.on .jf-chip-add{ opacity:1; }
+.jf-deliv-note{ color:var(--muted); font-size:12px; margin-top:8px; }
+.jf-deliv-fee{ color:var(--sage-text); font-size:12px; margin-top:8px; }
+.jf-slot-wrap{ margin-top:16px; }
+
+/* feed delivery pill (coexists above the cart bar) */
+.jf-deliv-pill{ position:absolute; left:14px; right:14px; bottom:14px;
+  background:var(--sage); color:#fff; border-radius:16px; padding:13px 16px;
+  display:flex; align-items:center; justify-content:space-between; font-weight:600; font-size:13.5px;
+  box-shadow:0 12px 28px -12px rgba(143,82,16,.55); animation:slideUp .3s ease; }
+.jf-deliv-pill-l{ display:flex; align-items:center; gap:8px; }
+.jf-deliv-pill-time{ font-family:'Mitr'; font-variant-numeric:tabular-nums; }
+.jf-feed-has-deliv .jf-cartbar{ bottom:72px; }
+
 /* ordering + breathe */
 .jf-order-bubble{ width:108px; height:108px; border-radius:50%; background:var(--card); color:var(--coral-d);
   display:flex; align-items:center; justify-content:center; box-shadow:0 14px 30px -12px rgba(59,125,216,.5);
@@ -1031,6 +1423,18 @@ button[disabled]{ opacity:.45; pointer-events:none; }
   display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; transition:all .3s; }
 .jf-step-dot.done{ background:var(--sage); color:#fff; }
 .jf-order-hint{ color:var(--muted); font-size:13px; margin-top:24px; }
+
+/* track (live delivery countdown). .jf-order-bubble.jf-track-done is qualified
+   so the arrived state wins over .jf-order-bubble's bob regardless of order. */
+.jf-order-bubble.jf-track-done{ animation:none; background:var(--sage-l); color:var(--sage-text); }
+.jf-track-clock{ font-family:'Mitr'; font-weight:600; font-size:46px; color:var(--coral-d);
+  margin-top:14px; font-variant-numeric:tabular-nums; }
+.jf-track-sub{ color:var(--muted); font-size:13.5px; margin-top:6px; max-width:280px; line-height:1.5; }
+.jf-track-line{ color:var(--ink); font-size:14px; font-weight:600; margin-top:16px; }
+.jf-track-reason{ display:flex; gap:8px; align-items:center; justify-content:center; background:var(--sage-l);
+  color:var(--sage-text); border-radius:14px; padding:11px 14px; font-size:12.5px; margin-top:16px;
+  max-width:300px; line-height:1.5; }
+.jf-track-jar{ color:var(--sage-text); font-size:12px; margin-top:14px; max-width:280px; line-height:1.5; }
 
 /* reveal */
 .jf-reveal-burst{ animation:pop .5s; }
@@ -1079,6 +1483,12 @@ button[disabled]{ opacity:.45; pointer-events:none; }
   box-shadow:inset 0 0 0 1.5px var(--line); transition:transform .12s; }
 .jf-global-btn:active{ transform:scale(.97); }
 .jf-anon-note{ color:var(--muted); font-size:11px; text-align:center; margin-top:8px; line-height:1.5; }
+.jf-track-entry{ width:100%; display:flex; align-items:center; justify-content:space-between;
+  background:var(--sage-l); color:var(--sage-text); font-weight:600; font-size:13.5px;
+  border-radius:16px; padding:14px 16px; margin:0 0 14px;
+  box-shadow:inset 0 0 0 1.5px var(--line); transition:transform .12s; }
+.jf-track-entry:active{ transform:scale(.98); }
+.jf-track-entry-l{ display:flex; align-items:center; gap:8px; }
 .jf-bars{ padding:4px 6px 8px; display:flex; flex-direction:column; gap:11px; }
 .jf-bar-item{ display:flex; flex-direction:column; gap:5px; }
 .jf-bar-label{ display:flex; justify-content:space-between; font-size:13px; }
@@ -1099,6 +1509,8 @@ button[disabled]{ opacity:.45; pointer-events:none; }
   .jf-cta{ bottom:calc(16px + env(safe-area-inset-bottom)); }
   .jf-cartbar{ bottom:calc(14px + env(safe-area-inset-bottom)); }
   .jf-bottom-actions{ bottom:calc(16px + env(safe-area-inset-bottom)); }
+  .jf-deliv-pill{ bottom:calc(14px + env(safe-area-inset-bottom)); }
+  .jf-feed-has-deliv .jf-cartbar{ bottom:calc(72px + env(safe-area-inset-bottom)); }
 }
 
 @keyframes fade{ from{opacity:0} to{opacity:1} }

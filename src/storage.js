@@ -24,6 +24,7 @@ export function defaultMe() {
     hourCounts: {}, // { "13": 2, ... } — one tick per checkout
     today: null, // toDateString() for the daily soft cap
     todayCount: 0,
+    activeDelivery: null, // in-flight imaginary delivery (see Track screen), or null
   };
 }
 
@@ -41,6 +42,14 @@ function normalize(me) {
       me.itemCounts && typeof me.itemCounts === "object" ? me.itemCounts : {},
     hourCounts:
       me.hourCounts && typeof me.hourCounts === "object" ? me.hourCounts : {},
+    // A malformed activeDelivery must never crash the Track screen: only keep
+    // it if it's an object carrying a numeric absolute ETA, else fall to null.
+    activeDelivery:
+      me.activeDelivery &&
+      typeof me.activeDelivery === "object" &&
+      typeof me.activeDelivery.eta === "number"
+        ? me.activeDelivery
+        : null,
   };
 }
 
