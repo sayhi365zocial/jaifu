@@ -107,6 +107,14 @@ const ORDER_STEPS_SHOP = [
 // Soft daily cap: past this, a gentle interstitial asks the user to pause.
 const DAILY_CAP = 5;
 
+// Screens that are safe to deep-link / bookmark via the URL hash. Transient
+// flow screens (ordering, reveal, detail, cart, breathe) deliberately are not.
+const LINKABLE = new Set(["stats", "admin"]);
+const initialScreen = () => {
+  const h = typeof window !== "undefined" ? window.location.hash.slice(1) : "";
+  return LINKABLE.has(h) ? h : "mood";
+};
+
 const FEEDBACK_URL =
   import.meta.env.VITE_FEEDBACK_URL ||
   "mailto:sayhi@365zocial.com?subject=" + encodeURIComponent("ติชมแอปใจฟู");
@@ -115,7 +123,8 @@ export default function Jaifu() {
   // me = the persisted record; every mutation goes read-merge-write
   // through storage.js so two tabs can't lose each other's orders.
   const [me, setMe] = useState(initMe);
-  const [screen, setScreen] = useState("mood");
+  // Only #stats and #admin are deep-linkable; everything else starts at mood.
+  const [screen, setScreen] = useState(initialScreen);
   const [tab, setTab] = useState("food");
   const [moodBefore, setMoodBefore] = useState(null);
   const [cart, setCart] = useState([]);
@@ -181,6 +190,40 @@ export default function Jaifu() {
       setGlobal({ error: true });
     }
   };
+
+  // -------- URL hash <-> screen sync (deep-link #stats / #admin) --------
+  // If we land on #admin directly, load the shared stats once.
+  useEffect(() => {
+    if (initialScreen() === "admin") loadGlobal();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep the hash in sync with the current screen (only for linkable ones),
+  // so the URL is shareable. Push when opening #admin so the back button
+  // returns to #stats; replace for everything else to avoid history spam.
+  useEffect(() => {
+    const want = LINKABLE.has(screen) ? "#" + screen : "";
+    if (window.location.hash === want) return;
+    const url = want || window.location.pathname;
+    if (screen === "admin") window.history.pushState(null, "", url);
+    else window.history.replaceState(null, "", url);
+  }, [screen]);
+
+  // Back/forward: follow the hash to a linkable screen, else home to mood.
+  useEffect(() => {
+    const onPop = () => {
+      const h = window.location.hash.slice(1);
+      if (LINKABLE.has(h)) {
+        if (h === "admin") loadGlobal();
+        setScreen(h);
+      } else {
+        setScreen("mood");
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // -------- detail / customization --------
   const openItem = (it) => {
