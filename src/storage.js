@@ -28,6 +28,11 @@ export function defaultMe() {
     today: null, // toDateString() for the daily soft cap
     todayCount: 0,
     activeDelivery: null, // in-flight imaginary delivery (see Track screen), or null
+    // -------- address book + saved cards (local-only, NEVER pushed to server) --------
+    addresses: [],          // [{ uid, label, recipient, phone, line, subDistrict, district, province, postcode }]
+    defaultAddressId: null, // uid marked default, or null
+    savedCards: [],         // [{ uid, brand, last4, holder, label }] — never full PAN / CVV / expiry
+    payMethodCounts: {},    // { cod, transfer, card, bless } — local-only curiosity stat, NOT pushed
   };
 }
 
@@ -51,6 +56,21 @@ function normalize(me) {
       me.moodCounts && typeof me.moodCounts === "object" ? me.moodCounts : {},
     liftCounts:
       me.liftCounts && typeof me.liftCounts === "object" ? me.liftCounts : {},
+    // Drop malformed address/card rows (must carry a uid); invalidate a default
+    // pointer whose address was deleted upstream. Idempotent.
+    addresses: Array.isArray(me.addresses)
+      ? me.addresses.filter((a) => a && typeof a === "object" && a.uid != null)
+      : [],
+    defaultAddressId:
+      Array.isArray(me.addresses) &&
+      me.addresses.some((a) => a && a.uid === me.defaultAddressId)
+        ? me.defaultAddressId
+        : null,
+    savedCards: Array.isArray(me.savedCards)
+      ? me.savedCards.filter((c) => c && typeof c === "object" && c.uid != null)
+      : [],
+    payMethodCounts:
+      me.payMethodCounts && typeof me.payMethodCounts === "object" ? me.payMethodCounts : {},
     // A malformed activeDelivery must never crash the Track screen: only keep
     // it if it's an object carrying a numeric absolute ETA, else fall to null.
     activeDelivery:

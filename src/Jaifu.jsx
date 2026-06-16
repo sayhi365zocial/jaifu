@@ -3,6 +3,7 @@ import {
   Heart, ShoppingBag, Utensils, Plus, X, ChevronLeft,
   Check, PiggyBank, Home, Sparkles, TrendingUp, Flame, Bike,
   Package, ChefHat, RotateCcw, MessageCircle, Wind,
+  MapPin, Trash2,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, ResponsiveContainer, Tooltip,
@@ -117,6 +118,57 @@ const DELIVERY_METHODS = [
   { id: "normal", label: "ส่งปกติ", emoji: "🛵", note: "มาตามคิว สบายๆ ใจเย็นๆ" },
 ];
 
+/* -------- payment methods (chosen on the checkout screen) --------
+   Pure theater: every path lands the would-be spend in the jar; none charges. */
+const PAYMENT_METHODS = [
+  { id: "cod",      emoji: "🚪", label: "ชำระเงินปลายทาง", note: "จ่ายตอนของถึง — แต่ของไม่ได้มาจริง ก็เลยไม่ต้องจ่ายจริงด้วยนะ 💛" },
+  { id: "transfer", emoji: "🏦", label: "โอนเงิน",          note: "แนบสลิปก็ได้ ไม่แนบก็ได้ เราไม่ได้เอาไปใช้จริงอยู่แล้ว" },
+  { id: "card",     emoji: "💳", label: "บัตรเครดิต",        note: "กรอกเล่นๆ ได้เลย ไม่มีการตัดเงิน ไม่มีการส่งข้อมูลไปไหน" },
+  { id: "bless",    emoji: "🙏", label: "ขอพรจากฟ้า",        note: "ปล่อยให้ฟ้าตัดสิน วันนี้ฟ้าจะเปิดให้ไหมนะ ☁️" },
+];
+
+// "ขอพรจากฟ้า" grants 70% of the time. A deny is occasional comic relief, never
+// a wall — and (critically) has ZERO side effects (see placeOrder).
+const BLESSING_GRANT_P = 0.7;
+const BLESS_DENY = [
+  "ฟ้ายังไม่เปิด ☁️ วันนี้เมฆเยอะหน่อย ลองเลือกวิธีอื่นดูไหม",
+  "ฟ้าขอคิดดูก่อนนะ 🌥️ ระหว่างนี้เลือกวิธีอื่นไปพลางๆ ก็ได้",
+  "เทวดาติดประชุมอยู่ 🙏 เดี๋ยวค่อยมาขอใหม่ หรือเลือกวิธีอื่นก่อนก็ได้",
+  "พรหล่นหายระหว่างทางนิดนึง ☁️ ไม่เป็นไรนะ ลองทางอื่นดูก่อน",
+];
+
+// Address-form field config (label + placeholder + key into the draft object).
+// row:true fields pair side-by-side via .jf-field-row.
+const ADDRESS_FIELDS = [
+  { key: "label",       label: "ป้ายชื่อที่อยู่", placeholder: "บ้าน / ที่ทำงาน / หอพัก" },
+  { key: "recipient",   label: "ชื่อผู้รับ",      placeholder: "เช่น สมชาย ใจดี" },
+  { key: "phone",       label: "เบอร์โทร",        placeholder: "08x-xxx-xxxx", inputMode: "tel" },
+  { key: "line",        label: "ที่อยู่",         placeholder: "บ้านเลขที่ ซอย ถนน" },
+  { key: "subDistrict", label: "แขวง/ตำบล",       placeholder: "เช่น วังใหม่",      row: true },
+  { key: "district",    label: "เขต/อำเภอ",       placeholder: "เช่น ปทุมวัน",      row: true },
+  { key: "province",    label: "จังหวัด",         placeholder: "เช่น กรุงเทพมหานคร", row: true },
+  { key: "postcode",    label: "รหัสไปรษณีย์",    placeholder: "10330", inputMode: "numeric", row: true },
+];
+const EMPTY_ADDR = { label: "", recipient: "", phone: "", line: "", subDistrict: "", district: "", province: "", postcode: "" };
+
+// Cosmetic brand guess from the first digit (no validation — just a chip caption).
+const brandGuess = (num) => {
+  const d = (num || "").replace(/\D/g, "")[0];
+  return d === "4" ? "Visa" : d === "5" || d === "2" ? "Mastercard" : d === "3" ? "AMEX" : "บัตร";
+};
+
+// Build the SAFE saved-card record from raw form fields. Stores only a brand
+// guess + last 4 + holder + label — NEVER the full PAN, CVV, or expiry. uid is
+// passed in so callers control identity (Date.now()+Math.random()).
+const makeCardEntry = (c, uid) => {
+  const last4 = (c.number || "").replace(/\D/g, "").slice(-4) || "????";
+  const holder = (c.name || "").trim();
+  return { uid, brand: brandGuess(c.number), last4, holder, label: holder || "บัตรของฉัน" };
+};
+// Two saved cards are "the same" if brand+last4+holder match — used to dedupe so
+// a retry can't append an identical card.
+const sameCard = (a, b) => a.brand === b.brand && a.last4 === b.last4 && a.holder === b.holder;
+
 // Live status lines shown on the Track screen as the wait progresses.
 const FOOD_TRACK_LINES = [
   "ไรเดอร์รับของจากร้านเรียบร้อย 🛵",
@@ -218,6 +270,17 @@ export default function Jaifu() {
   // the gentle "ส่งปกติ" each fresh load. scheduledSlot is an absolute epoch-ms.
   const [deliveryMethod, setDeliveryMethod] = useState("normal");
   const [scheduledSlot, setScheduledSlot] = useState(null);
+
+  // -------- checkout: address selection (React-local; seeded from me.defaultAddressId) --------
+  const [selectedAddressId, setSelectedAddressId] = useState(null); // uid or null; survives cross-tab setMe
+  const [addrDraft, setAddrDraft] = useState(EMPTY_ADDR);           // add/edit form fields
+  const [editingAddrId, setEditingAddrId] = useState(null);         // uid being edited, or null = adding new
+  // -------- checkout: payment (all ephemeral; saved cards live in me) --------
+  const [payMethod, setPayMethod] = useState("cod");                // cod | transfer | card | bless
+  const [card, setCard] = useState({ number: "", name: "", expiry: "", cvv: "", save: false });
+  const [usedCardId, setUsedCardId] = useState(null);               // a saved-card uid, or null = manual entry
+  const [slip, setSlip] = useState(null);                           // { url, name } from createObjectURL — local only
+  const [blessDeny, setBlessDeny] = useState("");                   // deny banner text; "" = none
 
   const items = tab === "food" ? FOOD : SHOP;
   const customCfg = tab === "food" ? FOOD_CUSTOM : SHOP_CUSTOM;
@@ -375,6 +438,17 @@ export default function Jaifu() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Free a fake-slip blob URL the moment we leave checkout by ANY path — back to
+  // cart, browser-back/popstate to mood, or just navigating away — so an
+  // abandoned upload can't leak. commitOrder already revokes+nulls the slip
+  // before it switches to "reveal", so this never double-handles a committed one.
+  useEffect(() => {
+    if (screen !== "checkout" && slip) {
+      if (slip.url) URL.revokeObjectURL(slip.url);
+      setSlip(null);
+    }
+  }, [screen, slip]);
+
   // -------- detail / customization --------
   const openItem = (it) => {
     setCurrent(it);
@@ -427,6 +501,40 @@ export default function Jaifu() {
     else setScreen("ordering");
   };
 
+  // Cart CTA → the new checkout step (pick address + payment). Seeds the
+  // React-local address selection from the saved default, and clears any stale
+  // blessing-deny banner from a previous visit.
+  const goCheckout = () => {
+    if (cart.length === 0) return;
+    setSelectedAddressId((cur) => cur ?? me.defaultAddressId);
+    setBlessDeny("");
+    setScreen("checkout");
+  };
+
+  /* Checkout CTA handler. The "ขอพรจากฟ้า" roll happens HERE — strictly before
+     startOrder()'s cap gate and before commitOrder's single write block — so a
+     deny has ZERO side effects: no jar growth, no cap tick, no activeDelivery,
+     no setCart([]), no pushStats. A grant (and every non-bless method) falls
+     through to the unchanged startOrder() gate. */
+  const placeOrder = () => {
+    if (cart.length === 0) return;
+    if (payMethod === "bless" && Math.random() >= BLESSING_GRANT_P) {
+      // DENIED — stay on checkout, show a kind banner, reset the method so the
+      // user actively re-chooses. Nothing is written; return early.
+      setBlessDeny(BLESS_DENY[Math.floor(Math.random() * BLESS_DENY.length)]);
+      setPayMethod("cod");
+      return;
+    }
+    setBlessDeny("");
+    // NOTE: a "save this card" is NOT persisted here. startOrder() may divert to
+    // the breathe gate (over the daily cap), and tapping "พักก่อน" there abandons
+    // the order without committing — so persisting the card now would save (and,
+    // on retry, DUPLICATE) a card for an order that never happened. The card is
+    // folded into commitOrder's single committed-write block instead, mirroring
+    // the same "zero side effects until commit" contract the bless-deny honors.
+    startOrder(); // unchanged: DAILY_CAP → breathe, else ordering
+  };
+
   /* Commit the order the moment the ritual finishes — before the mood
      question — so closing the app on the reveal screen can never lose a
      jar the UI already announced. The after-mood answer is patched in
@@ -448,6 +556,25 @@ export default function Jaifu() {
     methodCounts[deliveryMethod] = (methodCounts[deliveryMethod] || 0) + 1;
     const moodCounts = { ...fresh.moodCounts };
     if (moodBefore) moodCounts[moodBefore] = (moodCounts[moodBefore] || 0) + 1;
+    // Payment method tally — LOCAL only (never added to the pushStats body), so
+    // the server keeps storing nothing but the original anonymous aggregates.
+    const payMethodCounts = { ...fresh.payMethodCounts };
+    payMethodCounts[payMethod] = (payMethodCounts[payMethod] || 0) + 1;
+    // Snapshot the chosen address (a place label) onto the delivery so Track can
+    // show where it's headed. fresh, not me, so a cross-tab edit is respected;
+    // fall back to the freshest default if the React-local selection was never
+    // seeded (e.g. the default was created in another tab after goCheckout ran).
+    const shipId = selectedAddressId ?? fresh.defaultAddressId;
+    const ship = fresh.addresses.find((a) => a.uid === shipId) || null;
+    const shipTo = ship ? (ship.label || ship.recipient || "ที่อยู่ของคุณ") : null;
+    // Persist the card ONLY on this committed path (mirrors the bless contract),
+    // and only when "save" is ticked for a freshly-typed card — deduped so a
+    // retry can't append an identical card.
+    let savedCards = fresh.savedCards;
+    if (payMethod === "card" && card.save && usedCardId === null) {
+      const entry = makeCardEntry(card, Date.now() + Math.random());
+      if (!savedCards.some((c) => sameCard(c, entry))) savedCards = [...savedCards, entry];
+    }
     const ts = now.getTime();
     const entry = {
       // Shipping folds into the jar, so the saved amount is the full orderTotal.
@@ -472,6 +599,8 @@ export default function Jaifu() {
     }
     const activeDelivery = {
       method: deliveryMethod,
+      payMethod, // record the payment method on the delivery
+      shipTo,    // place label for the Track screen, or null
       eta,
       placedTs: ts,
       reason,
@@ -489,6 +618,8 @@ export default function Jaifu() {
       hourCounts,
       methodCounts,
       moodCounts,
+      payMethodCounts,
+      savedCards, // unchanged unless a new "save this card" was committed above
       today: dk,
       todayCount: fresh.today === dk ? fresh.todayCount + 1 : 1,
       activeDelivery, // a re-order while one is in flight simply replaces it
@@ -502,6 +633,15 @@ export default function Jaifu() {
     // mysteriously disabled by a stale scheduled-without-slot state).
     setDeliveryMethod("normal");
     setScheduledSlot(null);
+    // Reset checkout/payment state too, so the next order starts clean. The slip
+    // object URL is revoked to avoid a blob leak. selectedAddressId is kept on
+    // purpose so the next order defaults to the same place (goCheckout re-seeds
+    // from me.defaultAddressId if it was cleared).
+    setPayMethod("cod");
+    setCard({ number: "", name: "", expiry: "", cvv: "", save: false });
+    setUsedCardId(null);
+    setSlip((s) => { if (s?.url) URL.revokeObjectURL(s.url); return null; });
+    setBlessDeny("");
     setScreen("reveal");
     pushStats(next).catch(() => { /* shared stats are best-effort */ });
   };
@@ -563,6 +703,62 @@ export default function Jaifu() {
     saveMe(next);
     setMe(next);
     setScreen("stats");
+  };
+
+  // -------- address book CRUD (local-only, read-merge-write like commitOrder) --------
+  const addAddress = (draft) => {
+    const fresh = freshest(me);
+    const uid = Date.now() + Math.random();
+    const addresses = [...fresh.addresses, { ...draft, uid }];
+    const next = { ...fresh, addresses };
+    if (addresses.length === 1) next.defaultAddressId = uid; // first address becomes default
+    saveMe(next); setMe(next);
+    return uid;
+  };
+
+  const updateAddress = (uid, updates) => {
+    const fresh = freshest(me);
+    if (!fresh.addresses.some((a) => a.uid === uid)) return false;
+    const addresses = fresh.addresses.map((a) =>
+      a.uid === uid ? { ...a, ...updates, uid } : a); // preserve uid
+    const next = { ...fresh, addresses };
+    saveMe(next); setMe(next);
+    return true;
+  };
+
+  const deleteAddress = (uid) => {
+    const fresh = freshest(me);
+    const addresses = fresh.addresses.filter((a) => a.uid !== uid);
+    if (addresses.length === fresh.addresses.length) return false;
+    const next = { ...fresh, addresses };
+    // Reassign the default if we deleted it: first remaining, else null.
+    if (fresh.defaultAddressId === uid)
+      next.defaultAddressId = addresses.length ? addresses[0].uid : null;
+    saveMe(next); setMe(next);
+    // If the React-local selection pointed at the deleted address, fall back to
+    // the (possibly new) default, else first remaining, else null.
+    setSelectedAddressId((cur) =>
+      cur === uid ? (next.defaultAddressId ?? addresses[0]?.uid ?? null) : cur);
+    return true;
+  };
+
+  const setDefaultAddress = (uid) => {
+    const fresh = freshest(me);
+    if (!fresh.addresses.some((a) => a.uid === uid)) return false;
+    const next = { ...fresh, defaultAddressId: uid };
+    saveMe(next); setMe(next);
+    return true;
+  };
+
+  // -------- saved cards CRUD (local-only; never full PAN / CVV / expiry) --------
+  const deleteCard = (uid) => {
+    const fresh = freshest(me);
+    const savedCards = fresh.savedCards.filter((c) => c.uid !== uid);
+    if (savedCards.length === fresh.savedCards.length) return false;
+    const next = { ...fresh, savedCards };
+    saveMe(next); setMe(next);
+    setUsedCardId((cur) => (cur === uid ? null : cur)); // drop a deleted selection
+    return true;
   };
 
   // "ช้อปต่อ" re-enters through the mood check-in unless one is already
@@ -639,7 +835,49 @@ export default function Jaifu() {
             slot={scheduledSlot} setSlot={setScheduledSlot} slots={scheduleSlots}
             back={() => setScreen("feed")}
             remove={(uid) => setCart((c) => c.filter((x) => x.uid !== uid))}
-            order={startOrder}
+            order={goCheckout}
+          />
+        )}
+
+        {screen === "checkout" && (
+          <Checkout
+            cart={cart} orderTotal={orderTotal}
+            addresses={me.addresses}
+            selectedAddress={me.addresses.find((a) => a.uid === (selectedAddressId ?? me.defaultAddressId)) || null}
+            goAddressBook={() => setScreen("addressBook")}
+            payMethod={payMethod}
+            setPayMethod={(id) => { setPayMethod(id); setBlessDeny(""); }}
+            blessDeny={blessDeny}
+            slip={slip} setSlip={setSlip}
+            card={card} setCard={setCard}
+            savedCards={me.savedCards} usedCardId={usedCardId} setUsedCardId={setUsedCardId}
+            onDeleteCard={deleteCard}
+            back={() => setScreen("cart")}
+            placeOrder={placeOrder}
+          />
+        )}
+
+        {screen === "addressBook" && (
+          <AddressBook
+            addresses={me.addresses} defaultId={me.defaultAddressId} selectedId={selectedAddressId}
+            onSelect={(uid) => { setSelectedAddressId(uid); setScreen("checkout"); }}
+            onSetDefault={setDefaultAddress}
+            onEdit={(a) => { setEditingAddrId(a.uid); setAddrDraft({ ...EMPTY_ADDR, ...a }); setScreen("addressForm"); }}
+            onDelete={deleteAddress}
+            onAdd={() => { setEditingAddrId(null); setAddrDraft(EMPTY_ADDR); setScreen("addressForm"); }}
+            back={() => setScreen("checkout")}
+          />
+        )}
+
+        {screen === "addressForm" && (
+          <AddressForm
+            draft={addrDraft} setDraft={setAddrDraft} editing={editingAddrId !== null}
+            back={() => setScreen("addressBook")}
+            onSave={() => {
+              if (editingAddrId !== null) updateAddress(editingAddrId, addrDraft);
+              else { const uid = addAddress(addrDraft); setSelectedAddressId(uid); }
+              setScreen("addressBook");
+            }}
           />
         )}
 
@@ -917,6 +1155,257 @@ function Cart({ cart, total, orderTotal, shippingFee, method, setMethod, slot, s
   );
 }
 
+/* -------- checkout: pick a delivery address + a "payment" method --------
+   Every method is theater — the would-be spend still lands in the jar. The CTA
+   is gated only on an empty cart (gentle, frictionless, like the cart screen);
+   a missing slip/card/address never blocks. The "ขอพรจากฟ้า" roll happens in
+   the parent's placeOrder(), not here, so a deny is side-effect-free. */
+function Checkout({
+  cart, orderTotal, addresses, selectedAddress, goAddressBook,
+  payMethod, setPayMethod, blessDeny, slip, setSlip,
+  card, setCard, savedCards, usedCardId, setUsedCardId, onDeleteCard, back, placeOrder,
+}) {
+  const empty = cart.length === 0;
+  const ctaLabel = payMethod === "bless" ? "ขอพรแล้วสั่งเลย 🙏" : "ยืนยัน · " + baht(orderTotal);
+  return (
+    <div className="jf-screen">
+      <div className="jf-detail-head between">
+        <button className="jf-icon-btn" onClick={back} aria-label="ย้อนกลับ"><ChevronLeft size={22} /></button>
+        <div className="jf-head-title">ยืนยันคำสั่งซื้อ</div>
+        <div style={{ width: 36 }} />
+      </div>
+      <div className="jf-detail-scroll">
+        {/* --- ship-to --- */}
+        <div className="jf-group-label" style={{ marginTop: 6 }}>ส่งไปที่</div>
+        <button className="jf-addr-row" onClick={goAddressBook} aria-label="เลือกหรือเปลี่ยนที่อยู่จัดส่ง">
+          <span className="jf-addr-ic" aria-hidden="true"><MapPin size={18} /></span>
+          <div className="jf-addr-mid">
+            {selectedAddress ? (
+              <>
+                <div className="jf-addr-label">{selectedAddress.label || "ที่อยู่"}{selectedAddress.recipient ? " · " + selectedAddress.recipient : ""}</div>
+                <div className="jf-addr-line">{selectedAddress.line} {selectedAddress.district} {selectedAddress.province} {selectedAddress.postcode}</div>
+              </>
+            ) : (
+              <div className="jf-addr-label">{addresses.length ? "เลือกที่อยู่จัดส่ง" : "เพิ่มที่อยู่จัดส่ง"}</div>
+            )}
+          </div>
+          <ChevronLeft size={18} aria-hidden="true" style={{ transform: "rotate(180deg)", opacity: .5 }} />
+        </button>
+
+        {/* --- payment method selector (reuses the delivery-chip pattern) --- */}
+        <div className="jf-group jf-deliv-group">
+          <div className="jf-group-label">เลือกวิธี “จ่าย” (แบบไม่ต้องจ่าย)</div>
+          {blessDeny && (
+            <div className="jf-bless-deny" role="status" aria-live="polite">
+              <span aria-hidden="true">☁️</span><span>{blessDeny}</span>
+            </div>
+          )}
+          <div className="jf-chips jf-deliv-chips">
+            {PAYMENT_METHODS.map((m) => {
+              const on = payMethod === m.id;
+              return (
+                <button key={m.id} className={"jf-chip jf-deliv-chip " + (on ? "on" : "")}
+                  onClick={() => setPayMethod(m.id)} aria-pressed={on}>
+                  <span className="jf-deliv-emoji" aria-hidden="true">{m.emoji}</span>
+                  <span className="jf-deliv-main">{m.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="jf-deliv-note">{PAYMENT_METHODS.find((m) => m.id === payMethod).note}</div>
+
+          {payMethod === "transfer" && <SlipUpload slip={slip} setSlip={setSlip} />}
+          {payMethod === "card" && (
+            <CardForm card={card} setCard={setCard}
+              savedCards={savedCards} usedCardId={usedCardId} setUsedCardId={setUsedCardId}
+              onDeleteCard={onDeleteCard} />
+          )}
+        </div>
+
+        <div className="jf-cart-note">
+          <Sparkles size={14} /> ทุกวิธีจบลงเหมือนกันหมด — ยอดเข้ากระปุก ไม่มีเงินออกจากบัญชีจริงสักบาท 💛
+        </div>
+        <div style={{ height: 96 }} />
+      </div>
+      <button className="jf-cta order" onClick={placeOrder} disabled={empty}>{ctaLabel}</button>
+    </div>
+  );
+}
+
+// Bank-transfer slip upload — pure theater: the chosen image is previewed
+// locally via an object URL and NEVER sent anywhere. The object URL is revoked
+// on replace/clear (and on commit, by the parent) so no blob leaks.
+function SlipUpload({ slip, setSlip }) {
+  const pick = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    if (slip && slip.url) URL.revokeObjectURL(slip.url); // revoke prior before replacing
+    setSlip({ url: URL.createObjectURL(f), name: f.name });
+  };
+  const clear = () => { if (slip && slip.url) URL.revokeObjectURL(slip.url); setSlip(null); };
+  return (
+    <div className="jf-slot-wrap">
+      <div className="jf-deliv-note">อัปสลิป (ปลอม) ก็ได้นะ เราไม่ได้เอาไปใช้จริง 💛</div>
+      <input id="jf-slip" type="file" accept="image/*" hidden onChange={pick} />
+      {!slip ? (
+        <>
+          <label htmlFor="jf-slip" className="jf-slip-btn">📎 แนบสลิป (ปลอมก็ได้นะ)</label>
+          <div className="jf-slip-row">จะแคปจอ จะรูปแมว จะรูปอะไรก็ได้ทั้งนั้น มันแค่ “ผ่านไปเฉยๆ”</div>
+        </>
+      ) : (
+        <>
+          <img className="jf-slip-thumb" src={slip.url} alt={"สลิปที่แนบ: " + slip.name} />
+          <div className="jf-slip-row">
+            <span>ได้รับสลิปแล้ว (แต่ไม่ได้เปิดดูจริงนะ) ✨</span>
+            <label htmlFor="jf-slip" className="jf-slip-relabel">เปลี่ยนสลิป</label>
+            <button className="jf-remove" onClick={clear} aria-label="เอาสลิปออก"><X size={16} /></button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Credit-card form — accepts ANYTHING (no validation; inputMode is just a
+// keyboard hint). CVV/expiry/full number are never persisted: only a masked
+// record (brand + last4 + holder) is saved, and only on a COMMITTED order when
+// "save" is ticked (folded into commitOrder, deduped — see makeCardEntry).
+function CardForm({ card, setCard, savedCards, usedCardId, setUsedCardId, onDeleteCard }) {
+  const set = (k) => (e) => setCard((c) => ({ ...c, [k]: e.target.value }));
+  return (
+    <div className="jf-slot-wrap">
+      {savedCards.length > 0 && (
+        <>
+          <div className="jf-group-label" style={{ marginTop: 4 }}>บัตรที่เคยบันทึกไว้</div>
+          <div className="jf-chips" style={{ marginBottom: 12 }}>
+            {savedCards.map((c) => (
+              // Select + delete are TWO sibling buttons (no interactive nesting):
+              // the chip "on" outline lives on the select button; the delete sits
+              // beside it inside the inline-flex wrapper.
+              <span key={c.uid} className="jf-saved-card">
+                <button className={"jf-chip " + (usedCardId === c.uid ? "on" : "")}
+                  onClick={() => setUsedCardId(c.uid)} aria-pressed={usedCardId === c.uid}>
+                  💳 {c.brand} •••• {c.last4} · {c.holder || "ไม่มีชื่อ"}
+                </button>
+                <button type="button" className="jf-card-del"
+                  aria-label={"ลบบัตร " + c.brand + " ลงท้าย " + c.last4}
+                  onClick={() => onDeleteCard(c.uid)}>
+                  <X size={13} />
+                </button>
+              </span>
+            ))}
+            <button className={"jf-chip " + (usedCardId === null ? "on" : "")}
+              onClick={() => setUsedCardId(null)} aria-pressed={usedCardId === null}>+ ใช้บัตรใบใหม่</button>
+          </div>
+        </>
+      )}
+      {usedCardId === null && (
+        <>
+          <div className="jf-info-note" role="note">
+            <span aria-hidden="true">🔒</span>
+            <span><b>ใส่เลขบัตรปลอมๆ ได้เลยนะ</b> ไม่ต้องใส่เลขบัตรจริง — แอปนี้ไม่ตัดเงิน ไม่ตรวจสอบ และไม่ส่งข้อมูลบัตรไปไหนทั้งนั้น 💛</span>
+          </div>
+          <div className="jf-field">
+            <label htmlFor="jf-cnum">หมายเลขบัตร (ปลอมได้)</label>
+            <input id="jf-cnum" className="jf-input" inputMode="numeric" placeholder="กรอกมั่วๆ ก็ได้ เช่น 1234 5678 9012 3456" value={card.number} onChange={set("number")} />
+          </div>
+          <div className="jf-field">
+            <label htmlFor="jf-cname">ชื่อบนบัตร (ปลอมได้)</label>
+            <input id="jf-cname" className="jf-input" placeholder="เช่น คุณ ใจฟู" value={card.name} onChange={set("name")} />
+          </div>
+          <div className="jf-field-row">
+            <div className="jf-field" style={{ flex: 1 }}>
+              <label htmlFor="jf-cexp">วันหมดอายุ (ปลอมได้)</label>
+              <input id="jf-cexp" className="jf-input" inputMode="numeric" placeholder="MM/YY" value={card.expiry} onChange={set("expiry")} />
+            </div>
+            <div className="jf-field" style={{ flex: 1 }}>
+              <label htmlFor="jf-ccvv">CVV (ปลอมได้)</label>
+              <input id="jf-ccvv" className="jf-input" inputMode="numeric" placeholder="มั่วๆ" value={card.cvv} onChange={set("cvv")} />
+            </div>
+          </div>
+          <label className="jf-save-row">
+            <input type="checkbox" checked={card.save} onChange={(e) => setCard((c) => ({ ...c, save: e.target.checked }))} />
+            <span>เก็บบัตรนี้ไว้ใช้ครั้งหน้าไหม</span>
+          </label>
+          <div className="jf-deliv-note">เราเก็บแค่ในเครื่องคุณเอง (4 ตัวท้าย + ชื่อ) ไม่ได้ส่งไปไหนเลยนะ 💛</div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Address book — list, set-default, edit, delete, add. Reuses the cart-item row
+// look and the CTA. Selecting a row picks it for checkout and returns there.
+function AddressBook({ addresses, defaultId, selectedId, onSelect, onSetDefault, onEdit, onDelete, onAdd, back }) {
+  return (
+    <div className="jf-screen">
+      <div className="jf-detail-head between">
+        <button className="jf-icon-btn" onClick={back} aria-label="ย้อนกลับ"><ChevronLeft size={22} /></button>
+        <div className="jf-head-title">ที่อยู่จัดส่ง</div>
+        <div style={{ width: 36 }} />
+      </div>
+      <div className="jf-detail-scroll">
+        {addresses.length === 0 && (
+          <div className="jf-chart-empty">ยังไม่มีที่อยู่ — เพิ่มที่อยู่แรกของคุณได้เลย</div>
+        )}
+        {addresses.map((a) => (
+          <div key={a.uid} className={"jf-addr-card " + (selectedId === a.uid ? "on" : "")}>
+            <button className="jf-addr-pick" onClick={() => onSelect(a.uid)} aria-pressed={selectedId === a.uid}>
+              <div className="jf-addr-label">
+                {a.label || "ที่อยู่"}{a.recipient ? " · " + a.recipient : ""}
+                {defaultId === a.uid && <span className="jf-addr-default">ค่าเริ่มต้น</span>}
+              </div>
+              <div className="jf-addr-line">{a.line} {a.subDistrict} {a.district} {a.province} {a.postcode}</div>
+              <div className="jf-addr-line">{a.phone}</div>
+            </button>
+            <div className="jf-addr-actions">
+              {defaultId !== a.uid && (
+                <button className="jf-addr-act" onClick={() => onSetDefault(a.uid)}>ตั้งเป็นค่าเริ่มต้น</button>
+              )}
+              <button className="jf-addr-act" onClick={() => onEdit(a)} aria-label="แก้ไขที่อยู่">แก้ไข</button>
+              <button className="jf-addr-act danger" onClick={() => onDelete(a.uid)} aria-label="ลบที่อยู่"><Trash2 size={15} /></button>
+            </div>
+          </div>
+        ))}
+        <div style={{ height: 96 }} />
+      </div>
+      <button className="jf-cta" onClick={onAdd}><Plus size={18} /> เพิ่มที่อยู่ใหม่</button>
+    </div>
+  );
+}
+
+// Add/edit one address. Non-validating by design (matches the app's frictionless
+// tone). Single-line fields stack; the four short fields pair into two rows.
+function AddressForm({ draft, setDraft, editing, back, onSave }) {
+  const set = (k) => (e) => setDraft((d) => ({ ...d, [k]: e.target.value }));
+  const singles = ADDRESS_FIELDS.filter((f) => !f.row);
+  const rows = ADDRESS_FIELDS.filter((f) => f.row);
+  const field = (f) => (
+    <div className="jf-field" key={f.key} style={f.row ? { flex: 1 } : undefined}>
+      <label htmlFor={"jf-af-" + f.key}>{f.label}</label>
+      <input id={"jf-af-" + f.key} className="jf-input"
+        inputMode={f.inputMode} placeholder={f.placeholder}
+        value={draft[f.key]} onChange={set(f.key)} />
+    </div>
+  );
+  return (
+    <div className="jf-screen">
+      <div className="jf-detail-head between">
+        <button className="jf-icon-btn" onClick={back} aria-label="ย้อนกลับ"><ChevronLeft size={22} /></button>
+        <div className="jf-head-title">{editing ? "แก้ไขที่อยู่" : "เพิ่มที่อยู่"}</div>
+        <div style={{ width: 36 }} />
+      </div>
+      <div className="jf-detail-scroll">
+        {singles.map(field)}
+        <div className="jf-field-row">{rows.slice(0, 2).map(field)}</div>
+        <div className="jf-field-row">{rows.slice(2, 4).map(field)}</div>
+        <div style={{ height: 96 }} />
+      </div>
+      <button className="jf-cta order" onClick={onSave}><Check size={18} /> {editing ? "บันทึกการแก้ไข" : "บันทึกที่อยู่"}</button>
+    </div>
+  );
+}
+
 // Guided breathing pause. The whole point of the soft cap is to interrupt a
 // compulsive loop, so "ขออีกครั้งเดียว" is locked behind one real breathe
 // cycle (~8s) with a live count of breaths remaining; "พักก่อนดีกว่า" is the
@@ -1086,6 +1575,7 @@ function Track({ d, onArrivedAck, goStats, goShop }) {
           <div className="jf-track-sub">คาดว่าถึงเวลา {arriveAt} น.</div>
           <div className="jf-track-line" aria-live="polite">{LINES[lineIdx]}</div>
           <div className="jf-track-reason"><Sparkles size={14} /> {d.reason}</div>
+          {d.shipTo && <div className="jf-track-jar">กำลังมุ่งหน้าไปที่ “{d.shipTo}” 📍</div>}
           <div className="jf-track-jar">ยอด {baht(d.amount)} เข้ากระปุกเรียบร้อยแล้ว — ของยังเดินทางมาให้ใจฟูต่อ 💛</div>
         </>
       ) : (
@@ -1558,6 +2048,54 @@ button[disabled]{ opacity:.45; pointer-events:none; }
 .jf-hour-col{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:3px; }
 .jf-hour-bar{ width:100%; border-radius:3px 3px 0 0; background:var(--coral); }
 .jf-hour-lbl{ font-size:9px; color:var(--muted); }
+
+/* checkout: text inputs (the app's first form fields) */
+.jf-input{ width:100%; padding:13px 14px; border-radius:14px; border:none; background:var(--card);
+  box-shadow:inset 0 0 0 1.5px var(--line); font:inherit; font-size:15px; color:var(--ink); transition:box-shadow .15s; }
+.jf-input:focus{ outline:none; box-shadow:inset 0 0 0 1.5px var(--coral); }
+.jf-input::placeholder{ color:var(--muted); }
+.jf-field{ margin-bottom:12px; }
+.jf-field label{ display:block; font-size:12.5px; font-weight:600; color:var(--muted); margin-bottom:6px; }
+.jf-field-row{ display:flex; gap:10px; }
+.jf-save-row{ display:flex; align-items:center; gap:10px; margin-top:6px; font-size:13.5px; cursor:pointer; }
+.jf-save-row input{ width:18px; height:18px; accent-color:var(--coral); }
+
+/* checkout: bank-transfer slip upload */
+.jf-slip-btn,.jf-slip-relabel{ display:inline-flex; align-items:center; gap:8px; padding:12px 16px;
+  border-radius:14px; background:var(--card); color:var(--coral-d); font-weight:600; font-size:13.5px;
+  box-shadow:inset 0 0 0 1.5px var(--line); margin-top:10px; cursor:pointer; }
+.jf-slip-relabel{ padding:7px 12px; margin-top:0; }
+.jf-slip-thumb{ width:100%; max-height:180px; object-fit:cover; border-radius:14px; margin-top:12px; }
+.jf-slip-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:8px; font-size:12.5px; color:var(--muted); }
+
+/* checkout: address rows / cards */
+.jf-addr-row{ width:100%; display:flex; align-items:center; gap:12px; background:var(--card); border-radius:16px;
+  padding:13px 14px; margin:6px 0 4px; text-align:left; box-shadow:0 5px 14px -10px rgba(0,0,0,.2); }
+.jf-addr-ic{ color:var(--coral-d); flex-shrink:0; display:flex; }
+.jf-addr-mid{ flex:1; min-width:0; }
+.jf-addr-card{ background:var(--card); border-radius:16px; padding:13px 14px; margin-bottom:11px;
+  box-shadow:0 5px 14px -10px rgba(0,0,0,.2); }
+.jf-addr-card.on{ box-shadow:inset 0 0 0 2px var(--coral); }
+.jf-addr-pick{ width:100%; text-align:left; }
+.jf-addr-label{ font-weight:600; font-size:14px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.jf-addr-line{ color:var(--muted); font-size:11.5px; line-height:1.45; margin-top:3px; }
+.jf-addr-default{ font-size:10.5px; font-weight:600; color:var(--coral-d); background:#E8F0FB;
+  border-radius:99px; padding:2px 8px; }
+.jf-addr-actions{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+.jf-addr-act{ display:flex; align-items:center; font-size:12px; font-weight:600; color:var(--coral-d);
+  background:#E8F0FB; border-radius:11px; padding:7px 12px; }
+.jf-addr-act.danger{ color:var(--sage-text); background:var(--sage-l); }
+
+/* checkout: info banners (calm blue family) — the blessing-deny notice and the
+   "you can type a fake card number" reassurance share one look. */
+.jf-bless-deny,.jf-info-note{ display:flex; gap:9px; align-items:flex-start; background:#EAF2FC; color:var(--coral-d);
+  border-radius:16px; padding:13px 15px; font-size:12.5px; line-height:1.55; margin-bottom:12px; }
+.jf-info-note b{ color:var(--coral-d); }
+
+/* checkout: a saved card = select chip + a sibling delete button, inline */
+.jf-saved-card{ display:inline-flex; align-items:center; gap:4px; }
+.jf-card-del{ display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px;
+  border-radius:11px; color:var(--sage-text); background:var(--sage-l); flex-shrink:0; }
 
 /* On real phones, drop the phone-in-phone frame: full dynamic viewport,
    no nested page scroll, CTAs clear of the iOS Safari toolbar. */
