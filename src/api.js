@@ -1,7 +1,9 @@
-/* Shared-stats API. The server stores anonymous aggregates only:
-   totals + item-name counts + hour-bucket counts. The client pushes its
-   absolute lifetime numbers so every push is idempotent and self-healing
-   (a missed push is repaired by the next one). */
+/* Shared-stats API. The server stores anonymous aggregates only: totals,
+   item-name / hour-bucket / delivery-method / mood / lift / payment-method
+   counts, and a coarse province tally (province name → count, from the ship-to
+   address — never the full address). The client pushes its absolute lifetime
+   numbers so every push is idempotent and self-healing (a missed push is
+   repaired by the next one). */
 
 // Same-origin by default: the Jaifu server serves both the SPA and the API.
 // VITE_API_BASE_URL only needs setting if the API is hosted elsewhere.
@@ -24,6 +26,8 @@ export async function pushStats(me) {
         methodCounts: me.methodCounts,
         moodCounts: me.moodCounts,
         liftCounts: me.liftCounts,
+        payMethodCounts: me.payMethodCounts,
+        provinceCounts: me.provinceCounts,
       }),
     }
   );

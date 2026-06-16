@@ -3,7 +3,7 @@ import {
   Heart, ShoppingBag, Utensils, Plus, X, ChevronLeft,
   Check, PiggyBank, Home, Sparkles, TrendingUp, Flame, Bike,
   Package, ChefHat, RotateCcw, MessageCircle, Wind,
-  MapPin, Trash2,
+  MapPin, Trash2, Crown,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, ResponsiveContainer, Tooltip,
@@ -31,6 +31,18 @@ const FOOD = [
   { id: "f6", emoji: "🍣", name: "ซูชิเซ็ต 12 คำ", price: 350, shop: "ซูชิเฮีย" },
   { id: "f7", emoji: "🍧", name: "บิงซูชาเขียว", price: 159, shop: "หวานเย็นใจ" },
   { id: "f8", emoji: "🥘", name: "หมาล่าทั่งกั้ว", price: 199, shop: "เผ็ดสะใจ" },
+  { id: "f9", emoji: "🍜", name: "ก๋วยเตี๋ยวต้มยำ", price: 50, shop: "เรือทองรสเด็ด" },
+  { id: "f10", emoji: "🍢", name: "ลูกชิ้นปิ้งจิ้มแจ่ว", price: 35, shop: "ป้านิดหน้าปากซอย" },
+  { id: "f11", emoji: "🥟", name: "ติ่มซำนึ่งร้อน", price: 89, shop: "ติ่มซำเฮียจู" },
+  { id: "f12", emoji: "🍛", name: "ข้าวหมูแดงหมูกรอบ", price: 60, shop: "นายหมงข้าวหมูแดง" },
+  { id: "f13", emoji: "🌮", name: "ทาโก้เนื้อสับ", price: 129, shop: "Amigo Cantina" },
+  { id: "f14", emoji: "🍔", name: "เบอร์เกอร์เนื้อชีส", price: 169, shop: "Burger Bro" },
+  { id: "f15", emoji: "🍤", name: "ผัดไทยกุ้งสด", price: 75, shop: "ผัดไทยประตูผี" },
+  { id: "f16", emoji: "🍲", name: "ต้มแซ่บกระดูกอ่อน", price: 95, shop: "ครัวอีสานบ้านนา" },
+  { id: "f17", emoji: "🍰", name: "เค้กช็อกโกแลตลาวา", price: 145, shop: "อบอุ่นเบเกอรี่" },
+  { id: "f18", emoji: "☕", name: "ลาเต้เย็นคั่วกลาง", price: 65, shop: "มุมกาแฟละมุน" },
+  { id: "f19", emoji: "🍱", name: "ข้าวหน้าปลาไหลย่าง", price: 289, shop: "อูนางิยะ" },
+  { id: "f20", emoji: "🦞", name: "ซีฟู้ดเซ็ตรวมมิตร", price: 420, shop: "ทะเลเผาเฮียอ้วน" },
 ];
 
 const SHOP = [
@@ -42,6 +54,18 @@ const SHOP = [
   { id: "s6", emoji: "👜", name: "กระเป๋าสะพายข้าง", price: 1890, shop: "Bag Story" },
   { id: "s7", emoji: "🕶️", name: "แว่นกันแดด", price: 890, shop: "Sun & Co" },
   { id: "s8", emoji: "🛋️", name: "หมอนอิงนุ่มฟู", price: 590, shop: "Cozy Home" },
+  { id: "s9", emoji: "📚", name: "สมุดโน้ตปกหนัง", price: 290, shop: "ร้านเครื่องเขียนใจดี" },
+  { id: "s10", emoji: "🧴", name: "เซรั่มบำรุงผิวหน้า", price: 690, shop: "Glow Skin" },
+  { id: "s11", emoji: "🧦", name: "ถุงเท้าคอตตอนเซ็ต 5 คู่", price: 199, shop: "Daily Basics" },
+  { id: "s12", emoji: "⌨️", name: "คีย์บอร์ดไร้สาย", price: 1590, shop: "Gadget Hub" },
+  { id: "s13", emoji: "🧥", name: "เสื้อแจ็คเก็ตกันลม", price: 1290, shop: "Urban Wear" },
+  { id: "s14", emoji: "🍳", name: "กระทะเซรามิกไม่ติด", price: 790, shop: "ครัวสุขใจ" },
+  { id: "s15", emoji: "🧸", name: "ตุ๊กตาหมีนุ่มนิ่ม", price: 490, shop: "Huggy Toys" },
+  { id: "s16", emoji: "💡", name: "โคมไฟอ่านหนังสือ", price: 650, shop: "Light & Living" },
+  { id: "s17", emoji: "🎮", name: "จอยเกมไร้สาย", price: 1790, shop: "Play Zone" },
+  { id: "s18", emoji: "🧳", name: "กระเป๋าเดินทางล้อลาก", price: 2890, shop: "Wander Luggage" },
+  { id: "s19", emoji: "📷", name: "กล้องฟิล์มเรโทร", price: 4990, shop: "Retro Cam" },
+  { id: "s20", emoji: "🪑", name: "เก้าอี้ทำงานเพื่อสุขภาพ", price: 3490, shop: "ErgoLife" },
 ];
 
 // Customization options — each tap is a micro-dopamine "choice" event.
@@ -76,6 +100,46 @@ const SHOP_CUSTOM = [
   ]},
 ];
 
+// Luxury — aspirational "น่าฝัน" goods. Prices are dramatic on purpose; the jar
+// still catches every baht, and the daily-cap breathe interstitial still applies.
+const LUX = [
+  { id: "lx1", emoji: "👜", name: "กระเป๋าแบรนด์เนมรุ่นลิมิเต็ด", price: 25000, shop: "Luxury Haven" },
+  { id: "lx2", emoji: "⌚", name: "นาฬิกาสวิสเรือนทอง", price: 180000, shop: "Chronograph Vault" },
+  { id: "lx3", emoji: "💎", name: "แหวนเพชรแท้ครึ่งกะรัต", price: 150000, shop: "Gemstone Gallery" },
+  { id: "lx4", emoji: "👓", name: "แว่นตาดีไซเนอร์รุ่นพรีเมียม", price: 35000, shop: "Shades Elite" },
+  { id: "lx5", emoji: "🎧", name: "หูฟังไฮเอนด์ระดับออดิโอไฟล์", price: 45000, shop: "Audio Temple" },
+  { id: "lx6", emoji: "📱", name: "สมาร์ตโฟนเรือธงรุ่นล่าสุด", price: 65000, shop: "Tech Kingdom" },
+  { id: "lx7", emoji: "👛", name: "กระเป๋าถือคอลเลกชันโอตกูตูร์", price: 420000, shop: "Haute Couture Boutique" },
+  { id: "lx8", emoji: "✈️", name: "ตั๋วเครื่องบินชั้นธุรกิจไปยุโรป", price: 280000, shop: "Jet Setter" },
+  { id: "lx9", emoji: "💍", name: "แหวนทองคำแท้ลายโบราณ", price: 55000, shop: "Golden Circle" },
+  { id: "lx10", emoji: "🚗", name: "ประสบการณ์ขับรถซูเปอร์คาร์หนึ่งวัน", price: 1500000, shop: "Exotic Motors" },
+];
+
+const LUX_CUSTOM = [
+  { key: "color", label: "สี", choices: [
+    { id: "bk", label: "ดำคลาสสิก", add: 0 },
+    { id: "cr", label: "ครีมนวล", add: 0 },
+    { id: "tl", label: "ทองคำอ่อน", add: 0 },
+    { id: "rg", label: "โรสโกลด์", add: 2000 },
+    { id: "bl", label: "น้ำเงินเข้ม", add: 3000 },
+  ]},
+  { key: "engrave", label: "สลักชื่อ / สลักลาย", multi: true, choices: [
+    { id: "init", label: "สลักอักษรย่อ (1-3 ตัว)", add: 1500 },
+    { id: "custom", label: "สลักข้อความสั้น (ถึง 50 ตัว)", add: 3500 },
+    { id: "symbol", label: "สลักสัญลักษณ์หรือลวดลาย", add: 2000 },
+  ]},
+  { key: "box", label: "กล่องของขวัญ / แพ็กเกจ", choices: [
+    { id: "std", label: "กล่องมาตรฐาน", add: 0 },
+    { id: "lux", label: "กล่องของขวัญหรูหรา (มีริบบิ้น)", add: 500 },
+    { id: "cert", label: "เพิ่มใบรับรองความแท้ / ที่ระลึก", add: 800 },
+  ]},
+  { key: "insure", label: "ความคุ้มครอง (สมมติ)", choices: [
+    { id: "no", label: "ไม่ต้อง", add: 0 },
+    { id: "basic", label: "ประกัน 1 ปี (ฟรี)", add: 0 },
+    { id: "plus", label: "ประกัน 3 ปี + ส่วนเสริม", add: 5000 },
+  ]},
+];
+
 const MOODS = [
   { id: "stress", emoji: "😣", label: "เครียด" },
   { id: "bored", emoji: "😐", label: "เบื่อ" },
@@ -105,6 +169,17 @@ const ORDER_STEPS_SHOP = [
   { icon: Bike, label: "พัสดุกำลังมา" },
 ];
 
+// Data-driven category registry — one source of truth for the feed tabs, the
+// item/customization lookup, and the kind stamp. Adding a category here wires up
+// the whole feed (no more food/shop binary branching). stepsKey picks the
+// delivery ritual; luxury reuses the shop "package" journey.
+const CATEGORIES = [
+  { id: "food", label: "อาหาร",    icon: Utensils,    items: FOOD, custom: FOOD_CUSTOM, stepsKey: "food" },
+  { id: "shop", label: "ช้อปปิ้ง", icon: ShoppingBag, items: SHOP, custom: SHOP_CUSTOM, stepsKey: "shop" },
+  { id: "lux",  label: "ลักชูรี่",  icon: Crown,       items: LUX,  custom: LUX_CUSTOM,  stepsKey: "shop" },
+];
+const STEPS_MAP = { food: ORDER_STEPS_FOOD, shop: ORDER_STEPS_SHOP };
+
 // Soft daily cap: past this, a gentle interstitial asks the user to pause.
 const DAILY_CAP = 5;
 
@@ -128,13 +203,28 @@ const PAYMENT_METHODS = [
 ];
 
 // "ขอพรจากฟ้า" grants 70% of the time. A deny is occasional comic relief, never
-// a wall — and (critically) has ZERO side effects (see placeOrder).
+// a wall — and (critically) has ZERO side effects (see proceedBless/placeOrder).
 const BLESSING_GRANT_P = 0.7;
 const BLESS_DENY = [
   "ฟ้ายังไม่เปิด ☁️ วันนี้เมฆเยอะหน่อย ลองเลือกวิธีอื่นดูไหม",
   "ฟ้าขอคิดดูก่อนนะ 🌥️ ระหว่างนี้เลือกวิธีอื่นไปพลางๆ ก็ได้",
   "เทวดาติดประชุมอยู่ 🙏 เดี๋ยวค่อยมาขอใหม่ หรือเลือกวิธีอื่นก่อนก็ได้",
   "พรหล่นหายระหว่างทางนิดนึง ☁️ ไม่เป็นไรนะ ลองทางอื่นดูก่อน",
+];
+
+// Spin-wheel segments for "ขอพรจากฟ้า". The wheel is theatre over the 70% roll:
+// the grant/deny is decided first, then the pointer lands on a random matching
+// segment so the visual always agrees with the outcome. 8 slices alternate
+// win/lose with playful Thai labels; `win` flags which slices count as a grant.
+const WHEEL_SEGMENTS = [
+  { label: "ฟ้าเปิดทาง", emoji: "🌈", win: true,  color: "#3B7DD8" },
+  { label: "เมฆบังนิดนึง", emoji: "☁️", win: false, color: "#9AB4D6" },
+  { label: "พรเต็มคำ",   emoji: "✨", win: true,  color: "#C9711A" },
+  { label: "เทวดาหลับ",   emoji: "😴", win: false, color: "#B0BEC5" },
+  { label: "โชคหล่นใส่",  emoji: "🍀", win: true,  color: "#5BA86F" },
+  { label: "ลองใหม่นะ",   emoji: "🌥️", win: false, color: "#A7B6C2" },
+  { label: "ฟ้าใจดี",     emoji: "💛", win: true,  color: "#E0A030" },
+  { label: "ขอพรรอบสอง",  emoji: "🙏", win: false, color: "#9AB4D6" },
 ];
 
 // Address-form field config (label + placeholder + key into the draft object).
@@ -282,8 +372,9 @@ export default function Jaifu() {
   const [slip, setSlip] = useState(null);                           // { url, name } from createObjectURL — local only
   const [blessDeny, setBlessDeny] = useState("");                   // deny banner text; "" = none
 
-  const items = tab === "food" ? FOOD : SHOP;
-  const customCfg = tab === "food" ? FOOD_CUSTOM : SHOP_CUSTOM;
+  const cat = CATEGORIES.find((c) => c.id === tab) || CATEGORIES[0];
+  const items = cat.items;
+  const customCfg = cat.custom;
   const cartTotal = cart.reduce((s, c) => s + c.total, 0);
   // Shipping folds into the jar: orderTotal is the single source of truth for
   // both the CTA and the commit (so jar / chart / reveal all agree).
@@ -308,10 +399,19 @@ export default function Jaifu() {
   const activeDeliveryRef = useRef(me.activeDelivery);
   useEffect(() => { activeDeliveryRef.current = me.activeDelivery; }, [me.activeDelivery]);
 
-  // Ritual steps follow what's actually in the cart, not the active tab.
-  const shopCount = cart.filter((c) => c.kind === "shop").length;
-  const orderSteps =
-    shopCount > cart.length - shopCount ? ORDER_STEPS_SHOP : ORDER_STEPS_FOOD;
+  // Ritual steps follow the dominant category in the cart, not the active tab.
+  // Each kind maps through its category's stepsKey (lux → shop), so a lux-heavy
+  // cart rides the package journey. A count tie is broken by CATEGORIES order
+  // (food first), so ties deterministically resolve to food; an empty cart also
+  // falls back to food.
+  const catRank = (id) => CATEGORIES.findIndex((c) => c.id === id);
+  const kindTally = {};
+  cart.forEach((c) => { kindTally[c.kind] = (kindTally[c.kind] || 0) + 1; });
+  const majorKind =
+    Object.entries(kindTally)
+      .sort((a, b) => b[1] - a[1] || catRank(a[0]) - catRank(b[0]))[0]?.[0] || "food";
+  const majorCat = CATEGORIES.find((c) => c.id === majorKind) || CATEGORIES[0];
+  const orderSteps = STEPS_MAP[majorCat.stepsKey] || ORDER_STEPS_FOOD;
 
   // The check-in streak is stamped when the user opens the mood screen, not
   // when they order — so it honestly counts "days you came back to check in"
@@ -357,6 +457,8 @@ export default function Jaifu() {
         methods: s.methods || {},
         moods: s.moods || {},
         lifts: s.lifts || {},
+        payMethods: s.payMethods || {},
+        provinces: Array.isArray(s.provinces) ? s.provinces : [],
       });
     } catch (e) {
       setGlobal({ error: true });
@@ -511,28 +613,40 @@ export default function Jaifu() {
     setScreen("checkout");
   };
 
-  /* Checkout CTA handler. The "ขอพรจากฟ้า" roll happens HERE — strictly before
-     startOrder()'s cap gate and before commitOrder's single write block — so a
-     deny has ZERO side effects: no jar growth, no cap tick, no activeDelivery,
-     no setCart([]), no pushStats. A grant (and every non-bless method) falls
-     through to the unchanged startOrder() gate. */
+  /* The committed path past the payment gate. Shared by the plain CTA and by a
+     granted spin-wheel blessing. NOTE: a "save this card" is NOT persisted here
+     — startOrder() may divert to the breathe gate (over the daily cap), and
+     tapping "พักก่อน" there abandons the order without committing, so persisting
+     the card now would save (and, on retry, DUPLICATE) a card for an order that
+     never happened. The card is folded into commitOrder's single committed-write
+     block instead, mirroring the "zero side effects until commit" contract. */
+  const proceedOrder = () => {
+    setBlessDeny("");
+    startOrder(); // unchanged: DAILY_CAP → breathe, else ordering
+  };
+
+  /* Checkout CTA handler. For "ขอพรจากฟ้า" we hand off to the spin-wheel screen,
+     which performs the 70% roll on settle — a deny there returns to checkout with
+     ZERO side effects (no jar growth, no cap tick, no activeDelivery, no
+     setCart([]), no pushStats). Every other method proceeds straight through. */
   const placeOrder = () => {
     if (cart.length === 0) return;
-    if (payMethod === "bless" && Math.random() >= BLESSING_GRANT_P) {
-      // DENIED — stay on checkout, show a kind banner, reset the method so the
-      // user actively re-chooses. Nothing is written; return early.
-      setBlessDeny(BLESS_DENY[Math.floor(Math.random() * BLESS_DENY.length)]);
-      setPayMethod("cod");
+    if (payMethod === "bless") {
+      setBlessDeny("");
+      setScreen("blessing");
       return;
     }
-    setBlessDeny("");
-    // NOTE: a "save this card" is NOT persisted here. startOrder() may divert to
-    // the breathe gate (over the daily cap), and tapping "พักก่อน" there abandons
-    // the order without committing — so persisting the card now would save (and,
-    // on retry, DUPLICATE) a card for an order that never happened. The card is
-    // folded into commitOrder's single committed-write block instead, mirroring
-    // the same "zero side effects until commit" contract the bless-deny honors.
-    startOrder(); // unchanged: DAILY_CAP → breathe, else ordering
+    proceedOrder();
+  };
+
+  // Spin-wheel settled on a GRANT → proceed exactly like any other method.
+  const onBlessGrant = () => proceedOrder();
+  // Spin-wheel settled on a DENY → back to checkout with a kind banner, reset
+  // the method so the user actively re-chooses. Nothing was written.
+  const onBlessDeny = () => {
+    setBlessDeny(BLESS_DENY[Math.floor(Math.random() * BLESS_DENY.length)]);
+    setPayMethod("cod");
+    setScreen("checkout");
   };
 
   /* Commit the order the moment the ritual finishes — before the mood
@@ -556,8 +670,8 @@ export default function Jaifu() {
     methodCounts[deliveryMethod] = (methodCounts[deliveryMethod] || 0) + 1;
     const moodCounts = { ...fresh.moodCounts };
     if (moodBefore) moodCounts[moodBefore] = (moodCounts[moodBefore] || 0) + 1;
-    // Payment method tally — LOCAL only (never added to the pushStats body), so
-    // the server keeps storing nothing but the original anonymous aggregates.
+    // Payment-method tally — now pushed as an anonymous aggregate for the shared
+    // admin board (only the method id is ever sent, never card details).
     const payMethodCounts = { ...fresh.payMethodCounts };
     payMethodCounts[payMethod] = (payMethodCounts[payMethod] || 0) + 1;
     // Snapshot the chosen address (a place label) onto the delivery so Track can
@@ -567,6 +681,14 @@ export default function Jaifu() {
     const shipId = selectedAddressId ?? fresh.defaultAddressId;
     const ship = fresh.addresses.find((a) => a.uid === shipId) || null;
     const shipTo = ship ? (ship.label || ship.recipient || "ที่อยู่ของคุณ") : null;
+    // Province tally for the shared board — only the province name (coarse,
+    // non-identifying), trimmed and skipped when empty. The full address never
+    // leaves the device; only this one field is aggregated.
+    const provinceCounts = { ...fresh.provinceCounts };
+    if (ship && ship.province) {
+      const prov = String(ship.province).trim();
+      if (prov) provinceCounts[prov] = (provinceCounts[prov] || 0) + 1;
+    }
     // Persist the card ONLY on this committed path (mirrors the bless contract),
     // and only when "save" is ticked for a freshly-typed card — deduped so a
     // retry can't append an identical card.
@@ -619,6 +741,7 @@ export default function Jaifu() {
       methodCounts,
       moodCounts,
       payMethodCounts,
+      provinceCounts,
       savedCards, // unchanged unless a new "save this card" was committed above
       today: dk,
       todayCount: fresh.today === dk ? fresh.todayCount + 1 : 1,
@@ -881,6 +1004,13 @@ export default function Jaifu() {
           />
         )}
 
+        {screen === "blessing" && (
+          <Blessing
+            onGrant={onBlessGrant} onDeny={onBlessDeny}
+            back={() => setScreen("checkout")}
+          />
+        )}
+
         {screen === "breathe" && (
           <Breathe
             count={me.today === todaySnap ? me.todayCount : 0}
@@ -956,12 +1086,15 @@ function Feed({ tab, setTab, items, openItem, cartCount, cartTotal, pop, goCart,
           </button>
         </div>
         <div className="jf-tabs">
-          <button className={"jf-tab " + (tab === "food" ? "on" : "")} onClick={() => setTab("food")} aria-pressed={tab === "food"}>
-            <Utensils size={15} /> อาหาร
-          </button>
-          <button className={"jf-tab " + (tab === "shop" ? "on" : "")} onClick={() => setTab("shop")} aria-pressed={tab === "shop"}>
-            <ShoppingBag size={15} /> ช้อปปิ้ง
-          </button>
+          {CATEGORIES.map((c) => {
+            const Icon = c.icon;
+            return (
+              <button key={c.id} className={"jf-tab " + (tab === c.id ? "on" : "")}
+                onClick={() => setTab(c.id)} aria-pressed={tab === c.id}>
+                <Icon size={15} /> {c.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -1406,6 +1539,96 @@ function AddressForm({ draft, setDraft, editing, back, onSave }) {
   );
 }
 
+/* "ขอพรจากฟ้า" spin-wheel. Two phases: PRAY (a gentle invite to make a wish /
+   say a little prayer before spinning) → SPIN (the wheel turns and settles on a
+   slice). The 70% grant/deny is rolled the moment the spin starts; we then pick
+   a random slice of the matching kind to land on, so the visual ALWAYS agrees
+   with the outcome. On settle we call onGrant (→ proceed to ordering) or onDeny
+   (→ back to checkout). Nothing is written here, so a deny is side-effect-free.
+   The wheel is drawn with a conic-gradient; reduced-motion skips the long spin. */
+const SEG_DEG = 360 / WHEEL_SEGMENTS.length;
+// Build the conic-gradient once from the segment colors so the wheel's paint
+// always matches WHEEL_SEGMENTS (each slice is a hard-edged colour band).
+const WHEEL_GRADIENT =
+  "conic-gradient(" +
+  WHEEL_SEGMENTS.map((s, i) => `${s.color} ${i * SEG_DEG}deg ${(i + 1) * SEG_DEG}deg`).join(", ") +
+  ")";
+function Blessing({ onGrant, onDeny, back }) {
+  const [phase, setPhase] = useState("pray"); // pray | spinning
+  const [angle, setAngle] = useState(0);      // wheel rotation in degrees
+  const settleRef = useRef(null);
+  useEffect(() => () => { if (settleRef.current) clearTimeout(settleRef.current); }, []);
+
+  const reduced =
+    typeof window !== "undefined" && window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const spin = () => {
+    if (phase === "spinning") return;
+    setPhase("spinning");
+    // Decide the outcome first, then choose a matching slice to land on.
+    const win = Math.random() < BLESSING_GRANT_P;
+    const pool = WHEEL_SEGMENTS.map((s, i) => [s, i]).filter(([s]) => s.win === win);
+    const [, idx] = pool[Math.floor(Math.random() * pool.length)];
+    // The pointer sits at the top (12 o'clock). To bring slice `idx`'s centre
+    // under the pointer, rotate so that centre reaches 0°, plus several full
+    // turns for the spin. Slice i spans [i*SEG_DEG, (i+1)*SEG_DEG]; its centre is
+    // (i+0.5)*SEG_DEG. We rotate the wheel by (turns*360 - centre).
+    const turns = reduced ? 0 : 5;
+    const centre = (idx + 0.5) * SEG_DEG;
+    const target = turns * 360 - centre;
+    // tiny jitter within the slice so it doesn't always stop dead-centre
+    const jitter = reduced ? 0 : (Math.random() - 0.5) * (SEG_DEG * 0.6);
+    setAngle(target + jitter);
+    const wait = reduced ? 200 : 3400; // match the CSS transition duration
+    settleRef.current = setTimeout(() => (win ? onGrant() : onDeny()), wait);
+  };
+
+  return (
+    <div className="jf-screen jf-center jf-pad">
+      <div className="jf-bless-head">ขอพรจากฟ้า</div>
+
+      <div className="jf-wheel-wrap">
+        <div className="jf-wheel-pointer" aria-hidden="true">▼</div>
+        <div
+          className={"jf-wheel" + (phase === "spinning" ? " spinning" : "")}
+          style={{ transform: `rotate(${angle}deg)`, background: WHEEL_GRADIENT }}
+          role="img" aria-label="วงล้อขอพรจากฟ้า"
+        >
+          {WHEEL_SEGMENTS.map((s, i) => (
+            // Spoke: rotate to the slice centre, then translate outward toward the
+            // rim (negative Y = up before rotation). 78px ≈ 0.63·radius on the
+            // 248px wheel, seating the emoji comfortably between hub and edge.
+            <span key={i} className="jf-wheel-label"
+              style={{ transform: `rotate(${(i + 0.5) * SEG_DEG}deg) translateY(-78px)` }}>
+              <span style={{ transform: `rotate(${-(i + 0.5) * SEG_DEG}deg)` }}>{s.emoji}</span>
+            </span>
+          ))}
+        </div>
+        <div className="jf-wheel-hub" aria-hidden="true"><Sparkles size={20} /></div>
+      </div>
+
+      {phase === "pray" ? (
+        <>
+          <div className="jf-bless-pray">
+            พนมมือ ตั้งจิตอธิษฐาน แล้วขอพรในใจสักครู่ 🙏<br />
+            “ขอให้ฟ้าเปิดทาง ให้ของชิ้นนี้ได้เข้ากระปุกด้วยเทอญ”
+          </div>
+          <div className="jf-bless-sub">พร้อมแล้วค่อยหมุน — ฟ้าจะใจดีไหม วันนี้ลองดู ✨</div>
+          <button className="jf-cta order jf-bless-cta" onClick={spin}>
+            <Sparkles size={18} /> สวดมนต์แล้ว หมุนเลย!
+          </button>
+          <button className="jf-bless-back" onClick={back}>ขอเปลี่ยนวิธีอื่นก่อน</button>
+        </>
+      ) : (
+        <div className="jf-bless-spinning" aria-live="polite">
+          กำลังหมุน… ตั้งจิตไว้นะ ฟ้ากำลังพิจารณา ☁️✨
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Guided breathing pause. The whole point of the soft cap is to interrupt a
 // compulsive loop, so "ขออีกครั้งเดียว" is locked behind one real breathe
 // cycle (~8s) with a live count of breaths remaining; "พักก่อนดีกว่า" is the
@@ -1505,7 +1728,8 @@ function Reveal({ amount, total, onDone }) {
       <div className="jf-reveal-title">เข้ากระปุกแล้ว!</div>
       <div className="jf-reveal-sub">
         ออเดอร์นี้ไม่ได้เกิดขึ้นจริง 💛 ยอดที่ใจอยากจ่าย {baht(amount)} ถูกเก็บไว้แทน<br />
-        ตอนนี้กระปุกของคุณมี <b>{baht(total)}</b>
+        ตอนนี้กระปุกของคุณมี <b>{baht(total)}</b><br />
+        ของแพงแค่ไหนก็เก็บเข้ากระปุกได้เหมือนกัน — ฟินตา ฟินใจ ไม่ต้องจ่ายจริง ✨
       </div>
       <div className="jf-after-q">แล้วตอนนี้รู้สึกยังไงบ้าง?</div>
       <div className="jf-after-row">
@@ -1679,7 +1903,7 @@ function Stats({ totalSaved, orderCount, streak, answeredCount, liftPct, wantRea
         <button className="jf-global-btn" onClick={goAdmin}>
           <TrendingUp size={16} /> ดูสถิติรวมของทุกคน
         </button>
-        <div className="jf-anon-note">สถิติรวมเก็บแบบไม่ระบุตัวตน — เฉพาะยอดรวม เมนูยอดฮิต ช่วงเวลา วิธีจัดส่ง อารมณ์ก่อนสั่ง และความรู้สึกหลังสั่ง (นับเป็นภาพรวมเท่านั้น) ไม่มีการเก็บประวัติรายออเดอร์</div>
+        <div className="jf-anon-note">สถิติรวมเก็บแบบไม่ระบุตัวตน — เฉพาะยอดรวม เมนูยอดฮิต ช่วงเวลา วิธีจัดส่ง วิธีชำระเงิน จังหวัดที่สั่ง (เฉพาะชื่อจังหวัด ไม่เก็บที่อยู่เต็ม) อารมณ์ก่อนสั่ง และความรู้สึกหลังสั่ง (นับเป็นภาพรวมเท่านั้น) ไม่มีการเก็บประวัติรายออเดอร์ ไม่มีการเก็บข้อมูลบัตร</div>
 
         <div style={{ height: 100 }} />
       </div>
@@ -1704,6 +1928,7 @@ function Stats({ totalSaved, orderCount, streak, answeredCount, liftPct, wantRea
 const METHOD_LABELS = [["instant", "ส่งทันที"], ["scheduled", "สั่งล่วงหน้า"], ["normal", "ส่งปกติ"]];
 const MOOD_LABELS = [["stress", "เครียด"], ["bored", "เบื่อ"], ["sad", "เศร้า"], ["tired", "เหนื่อย"]];
 const LIFT_LABELS = [["better", "โล่งขึ้น"], ["same", "เหมือนเดิม"], ["want", "ยังอยากซื้อจริง"]];
+const PAY_LABELS = [["cod", "ปลายทาง"], ["transfer", "โอนเงิน"], ["card", "บัตรเครดิต"], ["bless", "ขอพรจากฟ้า"]];
 
 // Reuses the .jf-bars markup for any fixed-key count map. Math.max(1, …) floors
 // the denominator so an all-zero or single-key map never divides by zero.
@@ -1807,6 +2032,29 @@ function Admin({ g, refresh, back }) {
               <div className="jf-chart-title">ความรู้สึกหลังสั่ง</div>
               <CountBars data={g.lifts} labels={LIFT_LABELS} />
             </div>
+
+            <div className="jf-chart-card" style={{ marginTop: 14 }}>
+              <div className="jf-chart-title">ประเภทการชำระเงิน</div>
+              <CountBars data={g.payMethods || {}} labels={PAY_LABELS} />
+            </div>
+
+            <div className="jf-chart-card" style={{ marginTop: 14 }}>
+              <div className="jf-chart-title">จังหวัดที่สั่ง</div>
+              {!g.provinces || g.provinces.length === 0 ? (
+                <div className="jf-chart-empty">ยังไม่มีข้อมูล</div>
+              ) : (
+                <div className="jf-bars">
+                  {g.provinces.map(([prov, n]) => (
+                    <div key={prov} className="jf-bar-item">
+                      <div className="jf-bar-label"><span>{prov}</span><b>{n}</b></div>
+                      <div className="jf-bar-track">
+                        <div className="jf-bar-fill" style={{ width: (n / (g.provinces[0][1] || 1)) * 100 + "%" }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </>
         )}
         <div style={{ height: 30 }} />
@@ -1862,9 +2110,9 @@ button[disabled]{ opacity:.45; pointer-events:none; }
 .jf-top-row{ display:flex; align-items:center; justify-content:space-between; }
 .jf-jar-pill{ display:flex; align-items:center; gap:6px; background:var(--sage-l); color:var(--sage-text);
   font-weight:600; font-size:13.5px; padding:7px 13px; border-radius:99px; }
-.jf-tabs{ display:flex; gap:8px; margin-top:16px; }
-.jf-tab{ flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
-  padding:11px; border-radius:14px; font-weight:500; font-size:14.5px; color:var(--muted);
+.jf-tabs{ display:flex; gap:7px; margin-top:16px; }
+.jf-tab{ flex:1; min-width:0; white-space:nowrap; display:flex; align-items:center; justify-content:center; gap:5px;
+  padding:11px 8px; border-radius:14px; font-weight:500; font-size:14px; color:var(--muted);
   background:transparent; transition:all .2s; }
 .jf-tab.on{ background:var(--ink); color:#fff; }
 
@@ -2091,6 +2339,32 @@ button[disabled]{ opacity:.45; pointer-events:none; }
 .jf-bless-deny,.jf-info-note{ display:flex; gap:9px; align-items:flex-start; background:#EAF2FC; color:var(--coral-d);
   border-radius:16px; padding:13px 15px; font-size:12.5px; line-height:1.55; margin-bottom:12px; }
 .jf-info-note b{ color:var(--coral-d); }
+
+/* "ขอพรจากฟ้า" spin wheel */
+.jf-bless-head{ font-family:'Mitr'; font-weight:500; font-size:22px; color:var(--coral-d); margin-bottom:4px; }
+.jf-wheel-wrap{ position:relative; width:248px; height:248px; margin:14px 0 18px; }
+.jf-wheel{ width:100%; height:100%; border-radius:50%;
+  box-shadow:0 14px 34px -12px rgba(28,42,68,.45), inset 0 0 0 6px #fff, 0 0 0 3px rgba(28,42,68,.06);
+  transition:transform 3.4s cubic-bezier(.17,.67,.21,1); will-change:transform; }
+.jf-wheel.spinning{ transition:transform 3.4s cubic-bezier(.17,.67,.21,1); }
+/* each label rides a spoke: the outer span rotates to the slice centre and
+   translates out to the rim; the inner span counter-rotates so the emoji stays
+   upright. The label box is zero-size and pinned at the wheel centre. */
+.jf-wheel-label{ position:absolute; left:50%; top:50%; width:0; height:0;
+  display:flex; align-items:center; justify-content:center; }
+.jf-wheel-label > span{ display:block; font-size:22px; line-height:1; }
+.jf-wheel-pointer{ position:absolute; top:-6px; left:50%; transform:translateX(-50%);
+  color:var(--sage); font-size:26px; z-index:3; filter:drop-shadow(0 2px 3px rgba(0,0,0,.25)); }
+.jf-wheel-hub{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  width:54px; height:54px; border-radius:50%; background:#fff; color:var(--sage);
+  display:flex; align-items:center; justify-content:center; z-index:2;
+  box-shadow:0 4px 12px -4px rgba(0,0,0,.3); }
+.jf-bless-pray{ font-size:14px; line-height:1.7; color:var(--ink); max-width:300px; margin-top:4px; }
+.jf-bless-sub{ color:var(--muted); font-size:13px; margin-top:12px; max-width:280px; line-height:1.5; }
+.jf-bless-cta{ position:static; margin-top:22px; width:100%; }
+.jf-bless-back{ color:var(--muted); font-size:13px; margin-top:14px; text-decoration:underline; }
+.jf-bless-spinning{ font-family:'Mitr'; font-weight:500; font-size:16px; color:var(--coral-d);
+  margin-top:24px; max-width:280px; line-height:1.6; }
 
 /* checkout: a saved card = select chip + a sibling delete button, inline */
 .jf-saved-card{ display:inline-flex; align-items:center; gap:4px; }

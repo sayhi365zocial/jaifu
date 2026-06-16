@@ -12,19 +12,35 @@ const router = express.Router();
 // requests can't poison the "top items" board. Must match the FOOD+SHOP
 // catalogs in src/Jaifu.jsx.
 const ITEM_NAMES = new Set([
+  // food (FOOD)
   "ข้าวมันไก่", "กะเพราหมูกรอบ", "ชานมไข่มุก", "ส้มตำไก่ย่าง",
   "พิซซ่าหน้าฮาวายเอี้ยน", "ซูชิเซ็ต 12 คำ", "บิงซูชาเขียว", "หมาล่าทั่งกั้ว",
+  "ก๋วยเตี๋ยวต้มยำ", "ลูกชิ้นปิ้งจิ้มแจ่ว", "ติ่มซำนึ่งร้อน", "ข้าวหมูแดงหมูกรอบ",
+  "ทาโก้เนื้อสับ", "เบอร์เกอร์เนื้อชีส", "ผัดไทยกุ้งสด", "ต้มแซ่บกระดูกอ่อน",
+  "เค้กช็อกโกแลตลาวา", "ลาเต้เย็นคั่วกลาง", "ข้าวหน้าปลาไหลย่าง", "ซีฟู้ดเซ็ตรวมมิตร",
+  // shop (SHOP)
   "หูฟังไร้สาย", "รองเท้าผ้าใบ", "ต้นไม้ฟอกอากาศ", "เทียนหอมอโรม่า",
   "นาฬิกาสมาร์ตวอตช์", "กระเป๋าสะพายข้าง", "แว่นกันแดด", "หมอนอิงนุ่มฟู",
+  "สมุดโน้ตปกหนัง", "เซรั่มบำรุงผิวหน้า", "ถุงเท้าคอตตอนเซ็ต 5 คู่", "คีย์บอร์ดไร้สาย",
+  "เสื้อแจ็คเก็ตกันลม", "กระทะเซรามิกไม่ติด", "ตุ๊กตาหมีนุ่มนิ่ม", "โคมไฟอ่านหนังสือ",
+  "จอยเกมไร้สาย", "กระเป๋าเดินทางล้อลาก", "กล้องฟิล์มเรโทร", "เก้าอี้ทำงานเพื่อสุขภาพ",
+  // luxury (LUX)
+  "กระเป๋าแบรนด์เนมรุ่นลิมิเต็ด", "นาฬิกาสวิสเรือนทอง", "แหวนเพชรแท้ครึ่งกะรัต",
+  "แว่นตาดีไซเนอร์รุ่นพรีเมียม", "หูฟังไฮเอนด์ระดับออดิโอไฟล์", "สมาร์ตโฟนเรือธงรุ่นล่าสุด",
+  "กระเป๋าถือคอลเลกชันโอตกูตูร์", "ตั๋วเครื่องบินชั้นธุรกิจไปยุโรป", "แหวนทองคำแท้ลายโบราณ",
+  "ประสบการณ์ขับรถซูเปอร์คาร์หนึ่งวัน",
 ]);
 
 // Fixed key sets for the small aggregate maps — must match the ids in
-// src/Jaifu.jsx (DELIVERY_METHODS, MOODS, AFTER). Anything else is dropped.
+// src/Jaifu.jsx (DELIVERY_METHODS, MOODS, AFTER, PAYMENT_METHODS). Else dropped.
 const METHOD_IDS = new Set(["instant", "scheduled", "normal"]);
 const MOOD_IDS = new Set(["stress", "bored", "sad", "tired"]);
 const LIFT_IDS = new Set(["better", "same", "want"]);
+const PAY_IDS = new Set(["cod", "transfer", "card", "bless"]);
 
-const MAX_PRICE = 4070; // max item ฿3,990 + jumbo/topping add-ons
+// Priciest lux item ฿1,500,000 (supercar) + all lux add-ons (~฿14,300) +
+// shipping headroom; raising this only loosens the saved-amount clamp.
+const MAX_PRICE = 1520000;
 const MAX_COUNT = 200000;
 const MAX_ORDERS = 200000;
 
@@ -111,6 +127,28 @@ router.put("/stats/:userId", rateLimit(30), jaifuBody, async (req, res) => {
     const methodCounts = cleanCounts(req.body.methodCounts, (k) => METHOD_IDS.has(k));
     const moodCounts = cleanCounts(req.body.moodCounts, (k) => MOOD_IDS.has(k));
     const liftCounts = cleanCounts(req.body.liftCounts, (k) => LIFT_IDS.has(k));
+    const payMethodCounts = cleanCounts(req.body.payMethodCounts, (k) => PAY_IDS.has(k));
+    // Provinces are free text from the address form (no fixed Set possible), so
+    // validate inline rather than via cleanCounts: the trimmed name is stored as
+    // the key, must contain at least one Thai/Latin LETTER (rejects punctuation-
+    // only junk), is ≤40 chars, and only keys with a real positive count consume
+    // one of the 100 distinct-key slots — so the flood cap reflects what's
+    // actually written, never names dropped for a zero/invalid count.
+    const provinceCounts = {};
+    {
+      const src = req.body.provinceCounts;
+      if (src && typeof src === "object" && !Array.isArray(src)) {
+        for (const [k, v] of Object.entries(src)) {
+          if (Object.keys(provinceCounts).length >= 100) break;
+          const t = (k || "").trim();
+          if (t.length === 0 || t.length > 40) continue;
+          if (!/^[ก-๙\w\s\-.,'/]+$/.test(t) || !/[ก-๙a-zA-Z]/.test(t)) continue;
+          const n = asCount(v, MAX_COUNT);
+          if (n === null || n === 0) continue;
+          provinceCounts[t] = n;
+        }
+      }
+    }
 
     // GREATEST keeps totals monotonic. The jsonb maps are merged PER KEY by
     // GREATEST (not all-or-nothing) so a push at an equal order_count — e.g.
@@ -122,8 +160,8 @@ router.put("/stats/:userId", rateLimit(30), jaifuBody, async (req, res) => {
     // a key. EXCLUDED is read via its column (not an SRF in FROM) for clarity.
     await query(
       `INSERT INTO jaifu_stats
-         (user_id, saved, order_count, item_counts, hour_counts, method_counts, mood_counts, lift_counts, last_seen)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+         (user_id, saved, order_count, item_counts, hour_counts, method_counts, mood_counts, lift_counts, pay_method_counts, province_counts, last_seen)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
        ON CONFLICT (user_id) DO UPDATE SET
          saved = GREATEST(jaifu_stats.saved, EXCLUDED.saved),
          order_count = GREATEST(jaifu_stats.order_count, EXCLUDED.order_count),
@@ -132,10 +170,13 @@ router.put("/stats/:userId", rateLimit(30), jaifuBody, async (req, res) => {
          method_counts = ${mergeMax("method_counts")},
          mood_counts = ${mergeMax("mood_counts")},
          lift_counts = ${mergeMax("lift_counts")},
+         pay_method_counts = ${mergeMax("pay_method_counts")},
+         province_counts = ${mergeMax("province_counts")},
          last_seen = NOW()`,
       [userId, saved, orderCount,
        JSON.stringify(itemCounts), JSON.stringify(hourCounts),
-       JSON.stringify(methodCounts), JSON.stringify(moodCounts), JSON.stringify(liftCounts)]
+       JSON.stringify(methodCounts), JSON.stringify(moodCounts), JSON.stringify(liftCounts),
+       JSON.stringify(payMethodCounts), JSON.stringify(provinceCounts)]
     );
     res.json({ ok: true });
   } catch (error) {
@@ -178,11 +219,19 @@ router.get("/stats/summary", rateLimit(60), async (req, res) => {
           WHERE value ~ '^[0-9]+$'
           GROUP BY key`
       );
-    const [methodRows, moodRows, liftRows] = await Promise.all([
+    const [methodRows, moodRows, liftRows, payRows] = await Promise.all([
       sumMap("method_counts"),
       sumMap("mood_counts"),
       sumMap("lift_counts"),
+      sumMap("pay_method_counts"),
     ]);
+    // Provinces are open-ended (free text), so take the top 10 like item_counts.
+    const provRows = await query(
+      `SELECT key AS prov, SUM(value::numeric)::bigint AS n
+         FROM jaifu_stats, jsonb_each_text(province_counts)
+        WHERE value ~ '^[0-9]+$'
+        GROUP BY key ORDER BY n DESC LIMIT 10`
+    );
     const hours = Array(24).fill(0);
     hourRows.rows.forEach((r) => {
       if (r.hour >= 0 && r.hour < 24) hours[r.hour] = Number(r.n);
@@ -204,6 +253,8 @@ router.get("/stats/summary", rateLimit(60), async (req, res) => {
       methods: toMap(methodRows.rows, ["instant", "scheduled", "normal"]),
       moods: toMap(moodRows.rows, ["stress", "bored", "sad", "tired"]),
       lifts: toMap(liftRows.rows, ["better", "same", "want"]),
+      payMethods: toMap(payRows.rows, ["cod", "transfer", "card", "bless"]),
+      provinces: provRows.rows.map((r) => [r.prov, Number(r.n)]),
     };
     summaryCache = { at: Date.now(), data };
     res.json(data);
