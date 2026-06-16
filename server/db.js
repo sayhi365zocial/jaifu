@@ -29,6 +29,8 @@ export async function ensureSchema() {
       method_counts JSONB  NOT NULL DEFAULT '{}'::jsonb,
       mood_counts  JSONB   NOT NULL DEFAULT '{}'::jsonb,
       lift_counts  JSONB   NOT NULL DEFAULT '{}'::jsonb,
+      pay_method_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+      province_counts   JSONB NOT NULL DEFAULT '{}'::jsonb,
       first_seen   TIMESTAMP DEFAULT NOW(),
       last_seen    TIMESTAMP DEFAULT NOW()
     )
@@ -41,6 +43,8 @@ export async function ensureSchema() {
     ALTER TABLE jaifu_stats
       ADD COLUMN IF NOT EXISTS method_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
       ADD COLUMN IF NOT EXISTS mood_counts   JSONB NOT NULL DEFAULT '{}'::jsonb,
-      ADD COLUMN IF NOT EXISTS lift_counts   JSONB NOT NULL DEFAULT '{}'::jsonb
+      ADD COLUMN IF NOT EXISTS lift_counts   JSONB NOT NULL DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS pay_method_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS province_counts   JSONB NOT NULL DEFAULT '{}'::jsonb
   `);
 }

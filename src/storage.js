@@ -32,7 +32,8 @@ export function defaultMe() {
     addresses: [],          // [{ uid, label, recipient, phone, line, subDistrict, district, province, postcode }]
     defaultAddressId: null, // uid marked default, or null
     savedCards: [],         // [{ uid, brand, last4, holder, label }] — never full PAN / CVV / expiry
-    payMethodCounts: {},    // { cod, transfer, card, bless } — local-only curiosity stat, NOT pushed
+    payMethodCounts: {},    // { cod, transfer, card, bless } — payment choice, pushed for the shared admin board
+    provinceCounts: {},     // { "กรุงเทพมหานคร": 5, ... } — province of the ship-to address, pushed (anonymous)
   };
 }
 
@@ -71,6 +72,8 @@ function normalize(me) {
       : [],
     payMethodCounts:
       me.payMethodCounts && typeof me.payMethodCounts === "object" ? me.payMethodCounts : {},
+    provinceCounts:
+      me.provinceCounts && typeof me.provinceCounts === "object" ? me.provinceCounts : {},
     // A malformed activeDelivery must never crash the Track screen: only keep
     // it if it's an object carrying a numeric absolute ETA, else fall to null.
     activeDelivery:
