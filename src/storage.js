@@ -34,6 +34,8 @@ export function defaultMe() {
     savedCards: [],         // [{ uid, brand, last4, holder, label }] — never full PAN / CVV / expiry
     payMethodCounts: {},    // { cod, transfer, card, bless } — payment choice, pushed for the shared admin board
     provinceCounts: {},     // { "กรุงเทพมหานคร": 5, ... } — province of the ship-to address, pushed (anonymous)
+    // -------- discount wallet (local-only, NEVER pushed) --------
+    discountWallet: [],     // [{ codeId, collectedTs }] — references DISCOUNT_CODES[].id; reusable while valid
   };
 }
 
@@ -74,6 +76,12 @@ function normalize(me) {
       me.payMethodCounts && typeof me.payMethodCounts === "object" ? me.payMethodCounts : {},
     provinceCounts:
       me.provinceCounts && typeof me.provinceCounts === "object" ? me.provinceCounts : {},
+    // Drop malformed wallet rows (need a string codeId + numeric collectedTs).
+    discountWallet: Array.isArray(me.discountWallet)
+      ? me.discountWallet.filter(
+          (w) => w && typeof w === "object" &&
+                 typeof w.codeId === "string" && typeof w.collectedTs === "number")
+      : [],
     // A malformed activeDelivery must never crash the Track screen: only keep
     // it if it's an object carrying a numeric absolute ETA, else fall to null.
     activeDelivery:
