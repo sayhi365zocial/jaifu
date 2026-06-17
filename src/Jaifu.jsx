@@ -3,7 +3,7 @@ import {
   Heart, ShoppingBag, Utensils, Plus, X, ChevronLeft,
   Check, PiggyBank, Home, Sparkles, TrendingUp, Flame, Bike,
   Package, ChefHat, RotateCcw, MessageCircle, Wind,
-  MapPin, Trash2, Crown,
+  MapPin, Trash2, Crown, Ticket,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, ResponsiveContainer, Tooltip,
@@ -193,6 +193,95 @@ const DELIVERY_METHODS = [
   { id: "normal", label: "ส่งปกติ", emoji: "🛵", note: "มาตามคิว สบายๆ ใจเย็นๆ" },
 ];
 
+/* -------- discount codes (collect into a local wallet; apply ONE at checkout) --------
+   Pure theater like everything else: the discount only shrinks the would-be jar
+   amount, never a real charge. Catalog is an immutable const (like FOOD/SHOP).
+   Codes are REUSABLE while their window is open — no one-time consume (kindest UX,
+   and it sidesteps the "consume only at commit" trap; the DAILY_CAP is the real
+   friction gate). me.discountWallet only remembers WHICH codes you've collected;
+   validity + amount are recomputed live from this catalog every time.
+
+   window:
+     null                                → always-on
+     { type:"daily", hStart, hEnd }      → recurs every day, LOCAL hours; supports
+                                           across-midnight (hStart > hEnd, e.g. 22→02)
+     { type:"absolute", startMs, endMs } → fixed epoch-ms range [start, end)
+   kind: "percent" (value = %) | "baht" (value = flat ฿). maxDiscount caps percent. */
+// A broad current campaign window for the absolute-date demo codes, so they are
+// live now and for ~a year (2026-05-01 → 2027-05-01, local-ish UTC anchors).
+const CAMPAIGN_START = Date.UTC(2026, 4, 1);   // 1 May 2026
+const CAMPAIGN_END = Date.UTC(2027, 4, 1);     // 1 May 2027
+const DISCOUNT_CODES = [
+  // --- always-on ---
+  { id: "dc_welcome", code: "ใจฟู10",  kind: "percent", value: 10, minSpend: 0,   maxDiscount: 50,
+    emoji: "💛", label: "ลด 10% ต้อนรับใจฟู",          secret: false, window: null },
+  { id: "dc_flat20",  code: "ลด20",    kind: "baht",    value: 20, minSpend: 100, maxDiscount: null,
+    emoji: "🎟️", label: "ลด 20 บาท เมื่อยอดถึง ฿100",  secret: false, window: null },
+  { id: "dc_big15",   code: "จัดเต็ม15", kind: "percent", value: 15, minSpend: 300, maxDiscount: 150,
+    emoji: "🛍️", label: "ลด 15% เมื่อช้อปครบ ฿300",    secret: false, window: null },
+
+  // --- daily-hour-windowed ---
+  { id: "dc_morning", code: "อรุณสวัสดิ์", kind: "percent", value: 12, minSpend: 0,  maxDiscount: 60,
+    emoji: "☀️", label: "เช้านี้ลด 12% (06:00–09:00)", secret: false,
+    window: { type: "daily", hStart: 6,  hEnd: 9  } },
+  { id: "dc_lunch",   code: "มื้อเที่ยง", kind: "baht",    value: 25, minSpend: 80,  maxDiscount: null,
+    emoji: "🍜", label: "เที่ยงนี้ลด 25 บาท (11:00–13:00)", secret: false,
+    window: { type: "daily", hStart: 11, hEnd: 13 } },
+  { id: "dc_night",   code: "ราตรีสวัสดิ์", kind: "percent", value: 18, minSpend: 100, maxDiscount: 120,
+    emoji: "🌙", label: "กลางคืนลด 18% (20:00–23:00)", secret: false,
+    window: { type: "daily", hStart: 20, hEnd: 23 } },
+  { id: "dc_owl",     code: "นกฮูก",     kind: "baht",    value: 30, minSpend: 50,  maxDiscount: null,
+    emoji: "🦉", label: "สายดึกลด 30 บาท (22:00–02:00)", secret: false,
+    window: { type: "daily", hStart: 22, hEnd: 2  } }, // across-midnight: hStart > hEnd
+
+  // --- absolute-date-windowed ---
+  { id: "dc_payday",  code: "เงินเดือนออก", kind: "percent", value: 25, minSpend: 200, maxDiscount: 250,
+    emoji: "💸", label: "ช่วงเงินเดือนออก ลด 25%", secret: false,
+    window: { type: "absolute", startMs: CAMPAIGN_START, endMs: CAMPAIGN_END } },
+  { id: "dc_bday",    code: "สุขสันต์วันเกิด", kind: "percent", value: 50, minSpend: 300, maxDiscount: 500,
+    emoji: "🎂", label: "ฉลองครบรอบใจฟู ลด 50%!", secret: false,
+    window: { type: "absolute", startMs: CAMPAIGN_START, endMs: CAMPAIGN_END } },
+
+  // --- secret (manual-entry only; never listed in deals) ---
+  { id: "dc_vip",     code: "วีไอพีลับ", kind: "percent", value: 30, minSpend: 0,   maxDiscount: 400,
+    emoji: "👑", label: "โค้ดลับ VIP ลด 30%",       secret: true,  window: null },
+  { id: "dc_friend",  code: "เพื่อนชวน", kind: "baht",    value: 99, minSpend: 500, maxDiscount: null,
+    emoji: "👯", label: "โค้ดลับเพื่อนชวน ลด 99 บาท", secret: true,  window: null },
+];
+
+// Live validity of a code's window (LOCAL time, mirroring makeSlots/dayKey).
+// Across-midnight daily windows use OR, not AND.
+const isCodeValid = (code, now = Date.now()) => {
+  const w = code.window;
+  if (!w) return true;                          // always-on
+  if (w.type === "absolute") return now >= w.startMs && now < w.endMs;
+  if (w.type === "daily") {
+    const h = new Date(now).getHours();
+    return w.hStart <= w.hEnd
+      ? (h >= w.hStart && h < w.hEnd)            // same-day window
+      : (h >= w.hStart || h < w.hEnd);           // across-midnight (e.g. 22→02)
+  }
+  return false;                                 // unknown type → invalid
+};
+
+// The integer-baht discount a code yields against a base. 0 when minSpend isn't
+// met. Percent is rounded then capped by maxDiscount; both kinds are clamped so
+// the discount never exceeds base (a ฿99 code on a ฿55 order → jar 0, not −44).
+const discountFor = (code, base) => {
+  if (!code || base < (code.minSpend || 0)) return 0;
+  let d = code.kind === "percent" ? Math.round((base * code.value) / 100) : code.value;
+  if (code.kind === "percent" && code.maxDiscount != null) d = Math.min(d, code.maxDiscount);
+  return Math.max(0, Math.min(d, base));
+};
+
+const findCodeById = (id) => DISCOUNT_CODES.find((c) => c.id === id) || null;
+// Manual entry: case/space-insensitive match on the typed string (Thai or latin).
+const findCodeByTyped = (s) => {
+  const t = (s || "").trim().replace(/\s+/g, "").toLowerCase();
+  if (!t) return null;
+  return DISCOUNT_CODES.find((c) => c.code.replace(/\s+/g, "").toLowerCase() === t) || null;
+};
+
 /* -------- payment methods (chosen on the checkout screen) --------
    Pure theater: every path lands the would-be spend in the jar; none charges. */
 const PAYMENT_METHODS = [
@@ -371,6 +460,10 @@ export default function Jaifu() {
   const [usedCardId, setUsedCardId] = useState(null);               // a saved-card uid, or null = manual entry
   const [slip, setSlip] = useState(null);                           // { url, name } from createObjectURL — local only
   const [blessDeny, setBlessDeny] = useState("");                   // deny banner text; "" = none
+  // -------- discount code (React-LOCAL until commit, like usedCardId) --------
+  const [appliedCodeId, setAppliedCodeId] = useState(null); // code applied to THIS order, or null
+  const [redeemDraft, setRedeemDraft] = useState("");       // deals-screen manual-entry text
+  const [redeemMsg, setRedeemMsg] = useState(null);         // { ok, text } feedback banner, or null
 
   const cat = CATEGORIES.find((c) => c.id === tab) || CATEGORIES[0];
   const items = cat.items;
@@ -380,8 +473,23 @@ export default function Jaifu() {
   // both the CTA and the commit (so jar / chart / reveal all agree).
   const shippingFee = SHIPPING[deliveryMethod];
   const orderTotal = cartTotal + shippingFee;
+  // -------- discount derivation (single source of truth for the discounted jar) --
+  // The applied code must (a) still be in the wallet (cross-tab delete safety),
+  // (b) be valid right now, (c) yield a positive discount (meets minSpend). We
+  // discount the full orderTotal (goods+shipping) so the one number stays
+  // authoritative. jarTotal is what the CTA shows AND what commitOrder re-derives.
+  const appliedCode =
+    appliedCodeId && me.discountWallet.some((w) => w.codeId === appliedCodeId)
+      ? findCodeById(appliedCodeId)
+      : null;
+  const discount =
+    appliedCode && isCodeValid(appliedCode, Date.now())
+      ? discountFor(appliedCode, orderTotal)
+      : 0;
+  const jarTotal = Math.max(0, orderTotal - discount); // clamp ≥ 0
   // Regenerate the scheduled slots each render off a coarse (per-minute) clock
-  // so a cart left open never offers an already-passed slot.
+  // so a cart left open never offers an already-passed slot. The same per-minute
+  // re-render keeps discount-window validity fresh on a long-open checkout.
   const slotClock = Math.floor(Date.now() / 60000);
   const scheduleSlots = React.useMemo(() => makeSlots(Date.now()), [slotClock]);
   // If the picked slot ages out of the regenerated list (cart left open past
@@ -551,6 +659,13 @@ export default function Jaifu() {
     }
   }, [screen, slip]);
 
+  // Clear the deals collect/redeem banner whenever we leave the Deals screen by
+  // ANY path (header back, CodePicker re-entry, browser-back), so it never
+  // reappears stale on a later visit.
+  useEffect(() => {
+    if (screen !== "deals" && redeemMsg) setRedeemMsg(null);
+  }, [screen, redeemMsg]);
+
   // -------- detail / customization --------
   const openItem = (it) => {
     setCurrent(it);
@@ -658,6 +773,17 @@ export default function Jaifu() {
     const now = new Date();
     const dk = dayKey(now);
     const fresh = freshest(me);
+    // --- DISCOUNT: re-validate against FRESH time + FRESH cart, then drop to 0 if
+    //     anything changed during the bless wheel / breathe / ritual gap. This is
+    //     the hard safety net behind the soft checkout re-check; the jar must never
+    //     announce a discount it can't honor. orderTotal here is the same base the
+    //     checkout CTA used, so minSpend is checked against the truth. Reusable-
+    //     while-valid means the wallet is NOT mutated — it flows through ...fresh.
+    const _code = appliedCodeId && fresh.discountWallet.some((w) => w.codeId === appliedCodeId)
+      ? findCodeById(appliedCodeId) : null;
+    const _discount = _code && isCodeValid(_code, now.getTime())
+      ? discountFor(_code, orderTotal) : 0;
+    const committedJar = Math.max(0, orderTotal - _discount); // ← the ONE number
     const orderCount = fresh.orderCount + 1;
     const itemCounts = { ...fresh.itemCounts };
     cart.forEach((c) => { itemCounts[c.name] = (itemCounts[c.name] || 0) + 1; });
@@ -699,8 +825,9 @@ export default function Jaifu() {
     }
     const ts = now.getTime();
     const entry = {
-      // Shipping folds into the jar, so the saved amount is the full orderTotal.
-      idx: orderCount, saved: orderTotal,
+      // Shipping folds into the jar; a discount shrinks it. committedJar is the
+      // re-validated discounted amount (== the CTA the user tapped, == reveal).
+      idx: orderCount, saved: committedJar,
       moodBefore, moodAfter: null, lift: null, ts,
     };
     // Build the in-flight imaginary delivery. ETA is an absolute timestamp so
@@ -726,14 +853,14 @@ export default function Jaifu() {
       eta,
       placedTs: ts,
       reason,
-      amount: orderTotal,
+      amount: committedJar,
       itemCount: cart.length,
       steps: orderSteps === ORDER_STEPS_SHOP ? "shop" : "food",
       dismissed: false,
     };
     const next = {
       ...fresh,
-      totalSaved: fresh.totalSaved + orderTotal,
+      totalSaved: fresh.totalSaved + committedJar,
       orderCount,
       history: [...fresh.history, entry].slice(-100),
       itemCounts,
@@ -749,7 +876,7 @@ export default function Jaifu() {
     };
     saveMe(next);
     setMe(next);
-    setLastAmount(orderTotal);
+    setLastAmount(committedJar);
     setLastTs(ts); // so finishReveal patches THIS entry, not another tab's
     setCart([]);
     // Reset the selector so the next order starts clean (and the CTA is never
@@ -765,6 +892,11 @@ export default function Jaifu() {
     setUsedCardId(null);
     setSlip((s) => { if (s?.url) URL.revokeObjectURL(s.url); return null; });
     setBlessDeny("");
+    // Clear the applied discount code so the next order starts clean (the wallet
+    // itself stays in me — only the per-order selection resets).
+    setAppliedCodeId(null);
+    setRedeemDraft("");
+    setRedeemMsg(null);
     setScreen("reveal");
     pushStats(next).catch(() => { /* shared stats are best-effort */ });
   };
@@ -884,6 +1016,47 @@ export default function Jaifu() {
     return true;
   };
 
+  // -------- discount codes (wallet is in me; applied code is React-local) --------
+  // Collect a non-secret, currently-valid code into the wallet. Idempotent.
+  const collectCode = (codeId) => {
+    const code = findCodeById(codeId);
+    if (!code || code.secret) return { ok: false, text: "โค้ดนี้เก็บจากตรงนี้ไม่ได้นะ" };
+    if (!isCodeValid(code)) return { ok: false, text: "โค้ดนี้ยังไม่เปิดใช้ หรือหมดเวลาแล้ว" };
+    const fresh = freshest(me);
+    if (fresh.discountWallet.some((w) => w.codeId === codeId)) return { ok: true }; // already have it
+    const next = { ...fresh, discountWallet: [...fresh.discountWallet, { codeId, collectedTs: Date.now() }] };
+    saveMe(next); setMe(next);
+    return { ok: true };
+  };
+
+  // Manual entry (handles secret codes). Validates window, adds to wallet if
+  // absent, sets the feedback banner.
+  const redeemCode = () => {
+    const code = findCodeByTyped(redeemDraft);
+    if (!code)              { setRedeemMsg({ ok: false, text: "ไม่พบโค้ดนี้ ลองใหม่อีกครั้งนะ" }); return; }
+    if (!isCodeValid(code)) { setRedeemMsg({ ok: false, text: "โค้ดนี้ยังไม่เปิดใช้ หรือหมดเวลาแล้ว" }); return; }
+    const fresh = freshest(me);
+    if (!fresh.discountWallet.some((w) => w.codeId === code.id)) {
+      const next = { ...fresh, discountWallet: [...fresh.discountWallet, { codeId: code.id, collectedTs: Date.now() }] };
+      saveMe(next); setMe(next);
+    }
+    setRedeemDraft("");
+    setRedeemMsg({ ok: true, text: "เก็บโค้ด “" + code.label + "” เข้ากระปุกแล้ว 💛" });
+  };
+
+  // Apply a collected code to THIS order (id only — the discount is derived in
+  // render and re-derived at commit). React-local; never written to me.
+  const applyCode = (codeId) => {
+    const code = findCodeById(codeId);
+    if (!code) return false;
+    if (!me.discountWallet.some((w) => w.codeId === codeId)) return false;
+    if (!isCodeValid(code)) return false;
+    if (discountFor(code, orderTotal) <= 0) return false; // minSpend not met / no effect
+    setAppliedCodeId(codeId);
+    return true;
+  };
+  const clearCode = () => setAppliedCodeId(null);
+
   // "ช้อปต่อ" re-enters through the mood check-in unless one is already
   // active — the bookend is the whole point of the app.
   const shopAgain = () => {
@@ -939,6 +1112,7 @@ export default function Jaifu() {
             tab={tab} setTab={setTab} items={items} openItem={openItem}
             cartCount={cart.length} cartTotal={cartTotal} pop={pop}
             goCart={() => setScreen("cart")} goStats={() => setScreen("stats")}
+            goDeals={() => setScreen("deals")}
             totalSaved={me.totalSaved}
             activeDelivery={me.activeDelivery} goTrack={() => setScreen("track")}
           />
@@ -964,7 +1138,9 @@ export default function Jaifu() {
 
         {screen === "checkout" && (
           <Checkout
-            cart={cart} orderTotal={orderTotal}
+            cart={cart} orderTotal={orderTotal} jarTotal={jarTotal}
+            appliedCode={appliedCode} discount={discount}
+            openCodePicker={() => setScreen("codePicker")}
             addresses={me.addresses}
             selectedAddress={me.addresses.find((a) => a.uid === (selectedAddressId ?? me.defaultAddressId)) || null}
             goAddressBook={() => setScreen("addressBook")}
@@ -977,6 +1153,26 @@ export default function Jaifu() {
             onDeleteCard={deleteCard}
             back={() => setScreen("cart")}
             placeOrder={placeOrder}
+          />
+        )}
+
+        {screen === "deals" && (
+          <Deals
+            wallet={me.discountWallet}
+            onCollect={(id) => { const r = collectCode(id); if (!r.ok) setRedeemMsg(r); }}
+            redeemDraft={redeemDraft} setRedeemDraft={setRedeemDraft}
+            onRedeem={redeemCode} msg={redeemMsg}
+            back={() => setScreen("feed")}
+          />
+        )}
+
+        {screen === "codePicker" && (
+          <CodePicker
+            wallet={me.discountWallet} base={orderTotal} appliedCodeId={appliedCodeId}
+            onPick={(id) => { applyCode(id); setScreen("checkout"); }}
+            onClear={() => { clearCode(); setScreen("checkout"); }}
+            goDeals={() => setScreen("deals")}
+            back={() => setScreen("checkout")}
           />
         )}
 
@@ -1075,15 +1271,20 @@ function Mood({ onPick }) {
   );
 }
 
-function Feed({ tab, setTab, items, openItem, cartCount, cartTotal, pop, goCart, goStats, totalSaved, activeDelivery, goTrack }) {
+function Feed({ tab, setTab, items, openItem, cartCount, cartTotal, pop, goCart, goStats, goDeals, totalSaved, activeDelivery, goTrack }) {
   return (
     <div className={"jf-screen" + (activeDelivery ? " jf-feed-has-deliv" : "")}>
       <div className="jf-top">
         <div className="jf-top-row">
           <div className="jf-logo sm"><Heart size={16} fill="currentColor" /> ใจฟู</div>
-          <button className="jf-jar-pill" onClick={goStats} aria-label={"เปิดกระปุกของฉัน ตอนนี้มี " + baht(totalSaved)}>
-            <PiggyBank size={15} /> {baht(totalSaved)}
-          </button>
+          <div className="jf-top-actions">
+            <button className="jf-deal-pill" onClick={goDeals} aria-label="ดูโค้ดส่วนลด">
+              <Ticket size={15} /> โค้ดส่วนลด
+            </button>
+            <button className="jf-jar-pill" onClick={goStats} aria-label={"เปิดกระปุกของฉัน ตอนนี้มี " + baht(totalSaved)}>
+              <PiggyBank size={15} /> {baht(totalSaved)}
+            </button>
+          </div>
         </div>
         <div className="jf-tabs">
           {CATEGORIES.map((c) => {
@@ -1294,12 +1495,13 @@ function Cart({ cart, total, orderTotal, shippingFee, method, setMethod, slot, s
    a missing slip/card/address never blocks. The "ขอพรจากฟ้า" roll happens in
    the parent's placeOrder(), not here, so a deny is side-effect-free. */
 function Checkout({
-  cart, orderTotal, addresses, selectedAddress, goAddressBook,
+  cart, orderTotal, jarTotal, appliedCode, discount, openCodePicker,
+  addresses, selectedAddress, goAddressBook,
   payMethod, setPayMethod, blessDeny, slip, setSlip,
   card, setCard, savedCards, usedCardId, setUsedCardId, onDeleteCard, back, placeOrder,
 }) {
   const empty = cart.length === 0;
-  const ctaLabel = payMethod === "bless" ? "ขอพรแล้วสั่งเลย 🙏" : "ยืนยัน · " + baht(orderTotal);
+  const ctaLabel = payMethod === "bless" ? "ขอพรแล้วสั่งเลย 🙏" : "ยืนยัน · " + baht(jarTotal);
   return (
     <div className="jf-screen">
       <div className="jf-detail-head between">
@@ -1324,6 +1526,43 @@ function Checkout({
           </div>
           <ChevronLeft size={18} aria-hidden="true" style={{ transform: "rotate(180deg)", opacity: .5 }} />
         </button>
+
+        {/* --- discount code --- */}
+        <div className="jf-group-label" style={{ marginTop: 16 }}>โค้ดส่วนลด</div>
+        <button className="jf-addr-row" onClick={openCodePicker} aria-label="เลือกหรือเปลี่ยนโค้ดส่วนลด">
+          <span className="jf-addr-ic" aria-hidden="true"><Ticket size={18} /></span>
+          <div className="jf-addr-mid">
+            {appliedCode ? (
+              <>
+                <div className="jf-addr-label">{appliedCode.emoji} {appliedCode.label}</div>
+                <div className="jf-addr-line">{discount > 0 ? "ลด " + baht(discount) : "ยังใช้ไม่ได้กับยอดนี้"}</div>
+              </>
+            ) : (
+              <div className="jf-addr-label">เลือกโค้ดส่วนลดจากกระปุกของคุณ</div>
+            )}
+          </div>
+          <ChevronLeft size={18} aria-hidden="true" style={{ transform: "rotate(180deg)", opacity: .5 }} />
+        </button>
+
+        {appliedCode && discount === 0 && (
+          <div className="jf-bless-deny" role="status" aria-live="polite">
+            <span aria-hidden="true">🎟️</span>
+            <span>
+              {!isCodeValid(appliedCode)
+                ? "โค้ดนี้ยังไม่เปิดใช้ หรือหมดเวลาแล้ว"
+                : "โค้ดนี้ต้องสั่งขั้นต่ำ " + baht(appliedCode.minSpend) + " ก่อนนะ"}
+              {" "}— ยอดเต็มจะเข้ากระปุกตามเดิมนะ
+            </span>
+          </div>
+        )}
+
+        {appliedCode && discount > 0 && (
+          <div className="jf-discount-box">
+            <div className="jf-discount-line"><span>ยอดรวม</span><span>{baht(orderTotal)}</span></div>
+            <div className="jf-discount-line save"><span>ส่วนลด ({appliedCode.label})</span><span>−{baht(discount)}</span></div>
+            <div className="jf-discount-total"><span>ยอดเข้ากระปุก</span><span>{baht(jarTotal)}</span></div>
+          </div>
+        )}
 
         {/* --- payment method selector (reuses the delivery-chip pattern) --- */}
         <div className="jf-group jf-deliv-group">
@@ -1535,6 +1774,140 @@ function AddressForm({ draft, setDraft, editing, back, onSave }) {
         <div style={{ height: 96 }} />
       </div>
       <button className="jf-cta order" onClick={onSave}><Check size={18} /> {editing ? "บันทึกการแก้ไข" : "บันทึกที่อยู่"}</button>
+    </div>
+  );
+}
+
+// Human-readable window label for a discount code.
+const codeWindowLabel = (code) => {
+  const w = code.window;
+  if (!w) return "ใช้ได้ตลอด";
+  if (w.type === "daily") {
+    const pad = (n) => String(n).padStart(2, "0");
+    return "ใช้ได้ " + pad(w.hStart) + ":00–" + pad(w.hEnd) + ":00 น.";
+  }
+  if (w.type === "absolute") return "ถึง " + new Date(w.endMs).toLocaleDateString("th-TH");
+  return "";
+};
+// Short discount caption, e.g. "ลด 10%" / "ลด ฿50".
+const codeDiscountLabel = (code) =>
+  code.kind === "percent" ? "ลด " + code.value + "%" : "ลด " + baht(code.value);
+
+// The "unavailable" reason for an invalid code, by POSITION (not type): an
+// absolute code before its start says "not yet"; after its end says "expired".
+// Daily windows recur, so "opens again later" is always the right framing.
+const codeNaLabel = (code, now = Date.now()) => {
+  const w = code.window;
+  if (w && w.type === "absolute") return now < w.startMs ? "ยังไม่ถึงเวลา" : "หมดเวลาแล้ว";
+  return "ยังไม่ถึงเวลา";
+};
+
+// Deals screen: collect non-secret codes into the wallet + redeem a secret code
+// by typing it. The wallet (which codes you hold) lives in me; this screen only
+// reads it + calls the collect/redeem handlers. NOT deep-linkable (transient).
+function Deals({ wallet, onCollect, redeemDraft, setRedeemDraft, onRedeem, msg, back }) {
+  const visible = DISCOUNT_CODES.filter((c) => !c.secret);
+  return (
+    <div className="jf-screen">
+      <div className="jf-detail-head between">
+        <button className="jf-icon-btn" onClick={back} aria-label="ย้อนกลับ"><ChevronLeft size={22} /></button>
+        <div className="jf-head-title">โค้ดส่วนลด</div>
+        <div style={{ width: 36 }} />
+      </div>
+      <div className="jf-detail-scroll">
+        <div className="jf-cart-note">
+          <Ticket size={14} /> เก็บโค้ดไว้ในกระปุก แล้วเอาไปใช้ตอนยืนยันคำสั่งซื้อ — ส่วนลดจะช่วยให้ยอดเข้ากระปุกน้อยลง แต่ก็ยังเข้ากระปุกนะ 💛
+        </div>
+        {visible.map((c) => {
+          const valid = isCodeValid(c);
+          const have = wallet.some((w) => w.codeId === c.id);
+          return (
+            <div key={c.id} className={"jf-code-card" + (valid ? "" : " unavailable")}>
+              <span className="jf-code-emoji" aria-hidden="true">{c.emoji}</span>
+              <div className="jf-code-mid">
+                <div className="jf-code-label">{c.label}</div>
+                <div className="jf-code-discount">{codeDiscountLabel(c)}{c.minSpend > 0 ? " · ขั้นต่ำ " + baht(c.minSpend) : ""}</div>
+                <span className="jf-code-time">⏰ {codeWindowLabel(c)}</span>
+              </div>
+              <div className="jf-code-state">
+                {have ? (
+                  <span className="jf-code-have"><Check size={14} /> เก็บแล้ว</span>
+                ) : !valid ? (
+                  <span className="jf-code-na">{codeNaLabel(c)}</span>
+                ) : (
+                  <button className="jf-code-collect" onClick={() => onCollect(c.id)}>เก็บโค้ด</button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        <div className="jf-code-form">
+          <div className="jf-group-label">มีโค้ดลับ? พิมพ์ตรงนี้เลย</div>
+          <div className="jf-code-form-row">
+            <input className="jf-input" placeholder="พิมพ์โค้ดลับ เช่น วีไอพีลับ"
+              value={redeemDraft} onChange={(e) => setRedeemDraft(e.target.value)}
+              aria-label="พิมพ์โค้ดลับ" />
+            <button className="jf-code-redeem" onClick={onRedeem}>ใช้</button>
+          </div>
+          {msg && (
+            <div className={msg.ok ? "jf-code-success" : "jf-code-error"} role="status" aria-live="polite">
+              <span aria-hidden="true">{msg.ok ? "✨" : "🎟️"}</span><span>{msg.text}</span>
+            </div>
+          )}
+        </div>
+        <div style={{ height: 40 }} />
+      </div>
+    </div>
+  );
+}
+
+// Checkout code picker: choose ONE collected code to apply to this order. Each
+// wallet entry resolves through the catalog; a code that's invalid now or
+// doesn't meet minSpend for the current cart is shown disabled with the reason.
+function CodePicker({ wallet, base, appliedCodeId, onPick, onClear, goDeals, back }) {
+  const rows = wallet
+    .map((w) => findCodeById(w.codeId))
+    .filter(Boolean);
+  return (
+    <div className="jf-screen">
+      <div className="jf-detail-head between">
+        <button className="jf-icon-btn" onClick={back} aria-label="ย้อนกลับ"><ChevronLeft size={22} /></button>
+        <div className="jf-head-title">เลือกโค้ดส่วนลด</div>
+        <div style={{ width: 36 }} />
+      </div>
+      <div className="jf-detail-scroll">
+        {rows.length === 0 && (
+          <div className="jf-chart-empty">ยังไม่มีโค้ดในกระปุก — ไปเก็บโค้ดที่หน้าโค้ดส่วนลดก่อนนะ</div>
+        )}
+        <button className={"jf-code-card" + (appliedCodeId === null ? " on" : "")} onClick={onClear} style={{ width: "100%", textAlign: "left" }}>
+          <span className="jf-code-emoji" aria-hidden="true">🚫</span>
+          <div className="jf-code-mid"><div className="jf-code-label">ไม่ใช้โค้ด</div></div>
+          <div className="jf-code-state">{appliedCodeId === null && <Check size={16} />}</div>
+        </button>
+        {rows.map((c) => {
+          const valid = isCodeValid(c);
+          const d = discountFor(c, base);
+          const usable = valid && d > 0;
+          const reason = !valid ? "ยังไม่เปิด / หมดเวลา" : "ขั้นต่ำ " + baht(c.minSpend);
+          return (
+            <button key={c.id} disabled={!usable}
+              className={"jf-code-card" + (usable ? "" : " unavailable") + (appliedCodeId === c.id ? " on" : "")}
+              onClick={() => usable && onPick(c.id)} style={{ width: "100%", textAlign: "left" }}>
+              <span className="jf-code-emoji" aria-hidden="true">{c.emoji}</span>
+              <div className="jf-code-mid">
+                <div className="jf-code-label">{c.label}</div>
+                <div className="jf-code-discount">{usable ? "ลด " + baht(d) : reason}</div>
+              </div>
+              <div className="jf-code-state">{appliedCodeId === c.id && <Check size={16} />}</div>
+            </button>
+          );
+        })}
+        <button className="jf-global-btn" style={{ marginTop: 14 }} onClick={goDeals}>
+          <Ticket size={16} /> ไปเก็บโค้ดเพิ่ม
+        </button>
+        <div style={{ height: 40 }} />
+      </div>
     </div>
   );
 }
@@ -2339,6 +2712,52 @@ button[disabled]{ opacity:.45; pointer-events:none; }
 .jf-bless-deny,.jf-info-note{ display:flex; gap:9px; align-items:flex-start; background:#EAF2FC; color:var(--coral-d);
   border-radius:16px; padding:13px 15px; font-size:12.5px; line-height:1.55; margin-bottom:12px; }
 .jf-info-note b{ color:var(--coral-d); }
+
+/* discount: feed entry pill (sits beside the jar pill) */
+.jf-top-actions{ display:flex; align-items:center; gap:8px; }
+.jf-deal-pill{ display:flex; align-items:center; gap:6px; background:var(--butter); color:#5A3A00;
+  font-weight:600; font-size:12.5px; padding:7px 11px; border-radius:99px; transition:transform .12s; }
+.jf-deal-pill:active{ transform:scale(.97); }
+
+/* discount: code cards (deals + picker), mirror .jf-addr-card */
+.jf-code-card{ display:flex; align-items:flex-start; gap:12px; background:var(--card); border-radius:16px;
+  padding:12px 14px; margin-bottom:11px; box-shadow:0 5px 14px -10px rgba(0,0,0,.2); transition:opacity .2s; }
+.jf-code-card.unavailable{ opacity:.55; }
+.jf-code-card.on{ box-shadow:inset 0 0 0 2px var(--coral); }
+.jf-code-emoji{ font-size:26px; flex-shrink:0; line-height:1.2; }
+.jf-code-mid{ flex:1; min-width:0; }
+.jf-code-label{ font-weight:600; font-size:14px; color:var(--ink); }
+.jf-code-discount{ color:var(--coral-d); font-weight:600; font-size:12.5px; margin-top:3px; }
+.jf-code-state{ flex-shrink:0; display:flex; align-items:center; color:var(--sage-text); }
+.jf-code-collect{ font-size:12.5px; font-weight:600; color:#fff; background:var(--sage);
+  border-radius:11px; padding:8px 13px; }
+.jf-code-have{ display:flex; align-items:center; gap:5px; font-size:12.5px; font-weight:600; color:var(--sage-text); }
+.jf-code-na{ font-size:11.5px; font-weight:600; color:var(--muted); text-align:right; max-width:84px; }
+
+/* discount: time-window pill */
+.jf-code-time{ display:inline-flex; align-items:center; gap:4px; margin-top:6px;
+  background:var(--sage-l); color:var(--sage-text); padding:3px 9px; border-radius:12px;
+  font-size:10.5px; font-weight:600; }
+.jf-code-card.unavailable .jf-code-time{ background:var(--line); color:var(--muted); }
+
+/* discount: manual-redeem form (deals screen) */
+.jf-code-form{ margin-top:18px; }
+.jf-code-form-row{ display:flex; gap:8px; align-items:stretch; margin-top:10px; }
+.jf-code-form-row .jf-input{ flex:1; }
+.jf-code-redeem{ flex:0 0 auto; padding:0 18px; border-radius:14px; background:var(--ink); color:#fff;
+  font-weight:600; font-size:14px; }
+.jf-code-success{ display:flex; gap:9px; align-items:flex-start; background:#E7F3EC; color:var(--sage-text);
+  border-radius:16px; padding:13px 15px; font-size:12.5px; line-height:1.55; margin-top:12px; }
+.jf-code-error{ display:flex; gap:9px; align-items:flex-start; background:#FCEBDC; color:var(--sage-text);
+  border-radius:16px; padding:13px 15px; font-size:12.5px; line-height:1.55; margin-top:12px; }
+
+/* discount: checkout breakdown */
+.jf-discount-box{ margin:4px 0 12px; }
+.jf-discount-line{ display:flex; justify-content:space-between; font-size:13px; font-weight:600;
+  color:var(--muted); margin-bottom:6px; }
+.jf-discount-line.save{ color:var(--sage-text); }
+.jf-discount-total{ display:flex; justify-content:space-between; font-size:15px; font-weight:600;
+  color:var(--coral-d); border-top:1px solid var(--line); padding-top:8px; }
 
 /* "ขอพรจากฟ้า" spin wheel */
 .jf-bless-head{ font-family:'Mitr'; font-weight:500; font-size:22px; color:var(--coral-d); margin-bottom:4px; }
